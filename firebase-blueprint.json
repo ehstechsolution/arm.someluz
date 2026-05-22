@@ -1,0 +1,240 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Information stored for each active user inside Arthur Luz e Som",
+      "type": "object",
+      "properties": {
+        "avatar": {
+          "type": "string",
+          "description": "Profile image url or empty string"
+        },
+        "nome": {
+          "type": "string",
+          "description": "Full name"
+        },
+        "telefone": {
+          "type": "string",
+          "description": "Optional phone number in the format (xx) xxxxx-xxxx"
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of the client/operator"
+        },
+        "termoUso": {
+          "type": "boolean",
+          "description": "Terms of Use acceptance flag"
+        },
+        "nivelAcesso": {
+          "type": "string",
+          "enum": ["Equipe", "Administrador"],
+          "description": "User access level inside Arthur Luz e Som"
+        },
+        "cpf": {
+          "type": "string",
+          "description": "User Document CPF with format xxx.xxx.xxx-xx"
+        },
+        "endereco": {
+          "type": "string",
+          "description": "User formatted address data"
+        }
+      },
+      "required": ["avatar", "nome", "email", "termoUso", "nivelAcesso"]
+    },
+    "CompanyConfig": {
+      "title": "Company Configuration",
+      "description": "General settings and metadata about the company/enterprise",
+      "type": "object",
+      "properties": {
+        "nomeFantasia": {
+          "type": "string",
+          "description": "Commercial / trading name of the company"
+        },
+        "razaoSocial": {
+          "type": "string",
+          "description": "Company registration registered name - Razão Social"
+        },
+        "cnpj": {
+          "type": "string",
+          "description": "Company document CNPJ formatting as xx.xxx.xxx/xxxx-xx"
+        },
+        "logo": {
+          "type": "string",
+          "description": "Cloudinary corporate logo address url"
+        },
+        "cep": {
+          "type": "string",
+          "description": "Address Postal Code - CEP"
+        },
+        "endereco": {
+          "type": "string",
+          "description": "Complete formatted physical address"
+        },
+        "linkInstagram": {
+          "type": "string",
+          "description": "Official company Instagram URL string"
+        },
+        "linkYoutube": {
+          "type": "string",
+          "description": "Official company YouTube channel URL string"
+        },
+        "linkFacebook": {
+          "type": "string",
+          "description": "Official company Facebook page URL string"
+        }
+      },
+      "required": ["nomeFantasia", "cnpj"]
+    },
+    "CitiesConfig": {
+      "title": "Cálculo de Deslocamento",
+      "description": "City base offset specifications for logistics, transport, staff, and djs",
+      "type": "object",
+      "properties": {
+        "itens": {
+          "type": "array",
+          "description": "Lista de cidades configuradas"
+        }
+      },
+      "required": ["itens"]
+    },
+    "Equipment": {
+      "title": "Equipment",
+      "description": "Enterprise rental stock inventory containing prices, descriptions, and kits details",
+      "type": "object",
+      "properties": {
+        "categoria": {
+          "type": "string",
+          "enum": ["Paineis e Pistas", "Estruturas", "Sonorização", "Iluminação"],
+          "description": "Logistical stock category"
+        },
+        "nome": {
+          "type": "string",
+          "description": "Marketing and system identifier name"
+        },
+        "descricao": {
+          "type": "string",
+          "description": "General application descriptors"
+        },
+        "foto_url": {
+          "type": "string",
+          "description": "Visual asset locator Cloudinary URL"
+        },
+        "preco": {
+          "type": "number",
+          "description": "Base price coefficient"
+        },
+        "ativo": {
+          "type": "boolean",
+          "description": "Status toggle"
+        },
+        "is_kit": {
+          "type": "boolean",
+          "description": "Is combo of multiple equipment components"
+        },
+        "componentes": {
+          "type": "array",
+          "description": "Item components list when is_kit is set to true"
+        },
+        "atualizado_em": {
+          "type": "string",
+          "description": "Timestamp indicating last operation audit reference"
+        }
+      },
+      "required": ["categoria", "nome", "preco", "ativo", "is_kit"]
+    },
+    "Funcionario": {
+      "title": "Funcionário Técnico",
+      "description": "Administrative staff listing describing daily fees and linked accounts",
+      "type": "object",
+      "properties": {
+        "nome": {
+          "type": "string",
+          "description": "Full name of the employee"
+        },
+        "funcao": {
+          "type": "string",
+          "description": "Role / job title inside the crew"
+        },
+        "diaria": {
+          "type": "number",
+          "description": "Daily rental / escalation rate amount in BRL"
+        },
+        "foto_url": {
+          "type": "string",
+          "description": "Profile picture of the employee"
+        },
+        "ativo": {
+          "type": "boolean",
+          "description": "Is this crew member currently active for event assignments"
+        },
+        "usuario_id": {
+          "type": "string",
+          "description": "Optional linked system user account ID for personal dashboards credentials"
+        },
+        "atualizado_em": {
+          "type": "string",
+          "description": "Operation audit reference timestamp pointer"
+        }
+      },
+      "required": ["nome", "funcao", "diaria", "ativo"]
+    },
+    "Pacote": {
+      "title": "Configuração de Pacote",
+      "description": "Ready-to-book combo of technical equipments and resources for events",
+      "type": "object",
+      "properties": {
+        "nome": {
+          "type": "string"
+        },
+        "descricao": {
+          "type": "string"
+        },
+        "preco": {
+          "type": "number"
+        },
+        "categoria": {
+          "type": "string"
+        },
+        "foto_url": {
+          "type": "string"
+        },
+        "ativo": {
+          "type": "boolean"
+        },
+        "itens": {
+          "type": "array"
+        },
+        "atualizado_em": {
+          "type": "string"
+        }
+      },
+      "required": ["nome", "preco", "ativo"]
+    }
+  },
+  "firestore": {
+    "/usuarios/{userId}": {
+      "schema": "User",
+      "description": "Active user profiles"
+    },
+    "/funcionarios/{funcionarioId}": {
+      "schema": "Funcionario",
+      "description": "Administrative staff listing describing daily fees and linked accounts"
+    },
+    "/equipamentos/{equipamentoId}": {
+      "schema": "Equipment",
+      "description": "Enterprise rental stock inventory and active kits"
+    },
+    "/pacotes/{pacoteId}": {
+      "schema": "Pacote",
+      "description": "Ready-to-book packages and lighting/sound combo deals"
+    },
+    "/config/empresa": {
+      "schema": "CompanyConfig",
+      "description": "Company configurations and business profiles"
+    },
+    "/config/cidades": {
+      "schema": "CitiesConfig",
+      "description": "Logistics and city displacement pricing offset configurations"
+    }
+  }
+}

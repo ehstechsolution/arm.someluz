@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net: Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable, hardened security helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // Validation standard helper for matching strict keys and types
+    function isValidUser(data) {
+      return data.email is string && data.email.size() > 0 && data.email.size() <= 256
+        && data.nome is string && data.nome.size() > 0 && data.nome.size() <= 256
+        && data.avatar is string && data.avatar.size() <= 1048
+        && data.termoUso is bool
+        && data.nivelAcesso in ['Equipe', 'Administrador']
+        && (!('telefone' in data) || (data.telefone is string && data.telefone.size() <= 32))
+        && (!('cpf' in data) || (data.cpf is string && data.cpf.size() <= 16))
+        && (!('endereco' in data) || (data.endereco is string && data.endereco.size() <= 512));
+    }
+
+    // Validation standard helper for company configurations
+    function isValidCompanyConfig(data) {
+      return data.nomeFantasia is string && data.nomeFantasia.size() > 0 && data.nomeFantasia.size() <= 256
+        && data.cnpj is string && data.cnpj.size() > 0 && data.cnpj.size() <= 24
+        && (!('razaoSocial' in data) || (data.razaoSocial is string && data.razaoSocial.size() <= 256))
+        && (!('logo' in data) || (data.logo is string && data.logo.size() <= 1048))
+        && (!('cep' in data) || (data.cep is string && data.cep.size() <= 12))
+        && (!('endereco' in data) || (data.endereco is string && data.endereco.size() <= 512))
+        && (!('linkInstagram' in data) || (data.linkInstagram is string && data.linkInstagram.size() <= 512))
+        && (!('linkYoutube' in data) || (data.linkYoutube is string && data.linkYoutube.size() <= 512))
+        && (!('linkFacebook' in data) || (data.linkFacebook is string && data.linkFacebook.size() <= 512));
+    }
+
+    function isAdmin() {
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/usuarios/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.nivelAcesso == 'Administrador';
+    }
+
+    // Secure rule block for profiles
+    match /usuarios/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false; // Protect against complete user catalog scraping
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming())
+                     && incoming().email == resource.data.email; // Protect against email editing
+      allow delete: if isOwner(userId);
+    }
+
+    // Secure rule block for company configurations
+    match /config/empresa {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() && isValidCompanyConfig(incoming());
+    }
+
+    // Secure rule block for city displacement configurations
+    match /config/cidades {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Secure rule block for equipment configurations
+    match /equipamentos/{equipamentoId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Secure rule block for crew members (funcionarios)
+    match /funcionarios/{funcionarioId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Secure rule block for equipment packages / combos (pacotes)
+    match /pacotes/{pacoteId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
