@@ -46,7 +46,9 @@ export interface Equipment {
   categoria: 'Paineis e Pistas' | 'Estruturas' | 'Sonorização' | 'Iluminação';
   nome: string;
   descricao: string;
-  foto_url: string;
+  foto_url: string; // Maintain for retrocompatibility
+  fotos: string[];
+  foto_capa_url: string;
   preco: number;
   ativo: boolean;
   is_kit: boolean;
@@ -63,20 +65,28 @@ export interface DocumentItem {
   date: string;
 }
 
-export interface PackageItem {
-  equipamento_id: string;
+export interface PackageTeamMember {
+  funcao: string;
   quantidade: number;
-  nome?: string;
+  custo_diaria: number;
+}
+
+export interface PackageEquipment {
+  equipamento_id: string;
+  nome: string;
+  categoria: string;
+  quantidade: number;
+  preco_aluguel_unitario: number;
 }
 
 export interface PackageCombo {
   id: string;
-  nome: string;
+  titulo: string;
   descricao: string;
-  preco: number;
-  categoria: 'Completo' | 'Som' | 'Som & Luz' | 'Iluminação' | 'Efeitos Especiais';
-  foto_url: string;
   ativo: boolean;
-  itens: PackageItem[];
-  atualizado_em?: any;
+  preco_custo_base: number;
+  preco_venda: number;
+  criado_em: any;
+  equipe_tecnica: PackageTeamMember[];
+  equipamentos: PackageEquipment[];
 }
