@@ -18,6 +18,8 @@ import {
   FileText, 
   Sparkles,
   ChevronRight,
+  ChevronLeft,
+  Star,
   Info
 } from 'lucide-react';
 import { Equipment, EquipmentComponent } from '../types';
@@ -45,31 +47,32 @@ export default function EquipmentScreen() {
   // Form Panel state
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   // Form Field States
   const [formNome, setFormNome] = useState('');
   const [formCategoria, setFormCategoria] = useState<'Paineis e Pistas' | 'Estruturas' | 'Sonorização' | 'Iluminação'>('Sonorização');
   const [formDescricao, setFormDescricao] = useState('');
-  const [formFotoUrl, setFormFotoUrl] = useState('');
+  const [formFotos, setFormFotos] = useState<string[]>([]);
+  const [formFotoCapaUrl, setFormFotoCapaUrl] = useState('');
   const [formPreco, setFormPreco] = useState('');
   const [formAtivo, setFormAtivo] = useState(true);
-  
-  // Kit System States
-  const [formIsKit, setFormIsKit] = useState(false);
-  const [kitComponents, setKitComponents] = useState<KitComponentRow[]>([]);
-  const [selectedCompId, setSelectedCompId] = useState('');
-  const [selectedCompQty, setSelectedCompQty] = useState(1);
-  const [compSearchText, setCompSearchText] = useState('');
-
   // Toast notification state
   const [toast, setToast] = useState<{ show: boolean; type: 'success' | 'error' | 'warning'; message: string }>({
     show: false,
     type: 'success',
     message: ''
   });
-
   const [errorMsg, setErrorMsg] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Kit System States
+  const [formIsKit, setFormIsKit] = useState(false);
+  const [kitComponents, setKitComponents] = useState<KitComponentRow[]>([]);
+  const [selectedCompId, setSelectedCompId] = useState('');
+  const [selectedCompQty, setSelectedCompQty] = useState(1);
+  const [compSearchText, setCompSearchText] = useState('');
 
   // Display toast function
   const triggerToast = (type: 'success' | 'error' | 'warning', message: string) => {
@@ -118,7 +121,7 @@ export default function EquipmentScreen() {
         triggerToast('success', `Equipamento ${updated.nome} agora está ${updated.ativo ? 'Ativo' : 'Inativo'}!`);
       } catch (err: any) {
         console.error("Firestore toggle status error:", err);
-        triggerToast('error', 'Ops! Erro ao atualizar status no Firestore.');
+        triggerToast('error', 'Ops! Erro ao atualizar status.');
         try {
           handleFirestoreError(err, OperationType.WRITE, `equipamentos/${item.id}`);
         } catch {}
@@ -138,10 +141,10 @@ export default function EquipmentScreen() {
       if (db) {
         try {
           await deleteDoc(doc(db, 'equipamentos', id));
-          triggerToast('success', 'Equipamento excluído com sucesso do Firebase!');
+          triggerToast('success', 'Equipamento excluído com sucesso.');
         } catch (err: any) {
           console.error("Firestore delete error:", err);
-          triggerToast('error', 'Sem permissão para excluir equipamento no Firebase.');
+          triggerToast('error', 'Sem permissão para excluir equipamento.');
           try {
             handleFirestoreError(err, OperationType.DELETE, `equipamentos/${id}`);
           } catch {}
@@ -154,39 +157,44 @@ export default function EquipmentScreen() {
       }
     }
   };
-
-  // Image Upload handler using company general credentials
-  const handleImageUpload = async (file: File) => {
+  const handleImagesUpload = async (files: FileList | null) => {
+    if (!files) return;
     setIsUploading(true);
     setErrorMsg('');
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('upload_preset', 'equipamentos');
-
-      const response = await fetch('https://api.cloudinary.com/v1_1/dnatvwcxy/image/upload', {
-        method: 'POST',
-        body: formData
+      const uploadPromises = Array.from(files).map(async (file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', 'equipamentos');
+        const response = await fetch('https://api.cloudinary.com/v1_1/dnatvwcxy/image/upload', {
+          method: 'POST',
+          body: formData
+        });
+        if (!response.ok) throw new Error('Falha no upload para o Cloudinary.');
+        const data = await response.json();
+        return data.secure_url;
       });
-
-      if (!response.ok) {
-        throw new Error('Falha no upload para o Cloudinary (verifique as credenciais).');
+      
+      const urls = await Promise.all(uploadPromises);
+      const updatedFotos = [...formFotos, ...urls];
+      setFormFotos(updatedFotos);
+      if (!formFotoCapaUrl && updatedFotos.length > 0) {
+        setFormFotoCapaUrl(updatedFotos[0]);
       }
-
-      const uploadData = await response.json();
-      if (uploadData.secure_url) {
-        setFormFotoUrl(uploadData.secure_url);
-        triggerToast('success', 'Imagem enviada e sincronizada no Cloudinary!');
-      } else {
-        throw new Error('Retorno de imagem inválida.');
-      }
+      triggerToast('success', 'Imagens enviadas!');
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || 'Erro durante o upload da foto.');
-      triggerToast('error', 'Falha no upload da imagem.');
+      setErrorMsg('Falha no upload das imagens.');
+      triggerToast('error', 'Falha no upload das imagens.');
     } finally {
       setIsUploading(false);
     }
+  };
+
+  // Utility for Cloudinary image transformation
+  const getCloudinaryUrl = (url: string, width: number) => {
+    if (!url || !url.includes('cloudinary.com')) return url;
+    return url.replace('/upload/', `/upload/w_${width},c_limit/`);
   };
 
   // Open Panel for creating
@@ -195,7 +203,8 @@ export default function EquipmentScreen() {
     setFormNome('');
     setFormCategoria('Sonorização');
     setFormDescricao('');
-    setFormFotoUrl('');
+    setFormFotos([]);
+    setFormFotoCapaUrl('');
     setFormPreco('');
     setFormAtivo(true);
     setFormIsKit(false);
@@ -213,7 +222,12 @@ export default function EquipmentScreen() {
     setFormNome(item.nome);
     setFormCategoria(item.categoria);
     setFormDescricao(item.descricao || '');
-    setFormFotoUrl(item.foto_url);
+    
+    // Retrocompatibility for images
+    const fotos = (item.fotos && item.fotos.length > 0) ? item.fotos : [item.foto_url];
+    setFormFotos(fotos);
+    setFormFotoCapaUrl(item.foto_capa_url || item.foto_url || '');
+    
     setFormPreco(item.preco.toString());
     setFormAtivo(item.ativo);
     setFormIsKit(item.is_kit);
@@ -311,7 +325,7 @@ export default function EquipmentScreen() {
 
     setIsSaving(true);
     const resolvedId = editingId || 'eq_' + Date.now();
-    const finalFoto = formFotoUrl.trim() || 'https://res.cloudinary.com/dnatvwcxy/image/upload/v1779424576/logo_arthur_luz_e_som_lbrpth.jpg';
+    const finalFoto = formFotoCapaUrl.trim() || (formFotos.length > 0 ? formFotos[0] : 'https://res.cloudinary.com/dnatvwcxy/image/upload/v1779424576/logo_arthur_luz_e_som_lbrpth.jpg');
 
     const mappedComponents: EquipmentComponent[] = formIsKit 
       ? kitComponents.map(c => ({ equipamento_id: c.id, quantidade: c.quantidade })) 
@@ -322,7 +336,9 @@ export default function EquipmentScreen() {
       categoria: formCategoria,
       nome: formNome.trim(),
       descricao: formDescricao.trim(),
-      foto_url: finalFoto,
+      foto_url: formFotoCapaUrl || (formFotos.length > 0 ? formFotos[0] : ''),
+      fotos: formFotos,
+      foto_capa_url: formFotoCapaUrl || (formFotos.length > 0 ? formFotos[0] : ''),
       preco: Number(formPreco),
       ativo: formAtivo,
       is_kit: formIsKit,
@@ -334,12 +350,12 @@ export default function EquipmentScreen() {
     if (db) {
       try {
         await setDoc(doc(db, 'equipamentos', resolvedId), equipmentPayload);
-        triggerToast('success', `Equipamento "${formNome}" salvo com sucesso no Firebase!`);
+        triggerToast('success', `Equipamento "${formNome}" salvo com sucesso!`);
         setIsPanelOpen(false);
       } catch (err: any) {
         console.error("Firestore save exception:", err);
         setErrorMsg('Erro de permissão ou conexão ao salvar seu equipamento no Firestore.');
-        triggerToast('error', 'Erro ao salvar regras no Firestore.');
+        triggerToast('error', 'Erro ao salvar.');
         try {
           handleFirestoreError(err, OperationType.WRITE, `equipamentos/${resolvedId}`);
         } catch {}
@@ -551,10 +567,10 @@ export default function EquipmentScreen() {
             >
               {/* Card visual banner & details */}
               <div>
-                <div className="relative aspect-video w-full overflow-hidden bg-zinc-100 dark:bg-zinc-950/90 flex items-center justify-center">
+                <div className="relative aspect-video w-full overflow-hidden bg-zinc-100 dark:bg-zinc-950/90 flex items-center justify-center cursor-pointer" onClick={() => { setSelectedEquipment(item); setCurrentImageIndex(0); }}>
                   <img
                     referrerPolicy="no-referrer"
-                    src={item.foto_url || 'https://res.cloudinary.com/dnatvwcxy/image/upload/v1779424576/logo_arthur_luz_e_som_lbrpth.jpg'}
+                    src={getCloudinaryUrl(item.foto_capa_url || (item.fotos && item.fotos.length > 0 ? item.fotos[0] : item.foto_url), 500)}
                     alt={item.nome}
                     className="h-full w-full object-contain transition-transform duration-500 group-hover:scale-102"
                   />
@@ -667,6 +683,40 @@ export default function EquipmentScreen() {
         </div>
       )}
 
+      {/* Details Modal */}
+      <AnimatePresence>
+        {selectedEquipment && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedEquipment(null)} className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-white dark:bg-zinc-900 rounded-2xl w-full max-w-2xl p-6 overflow-hidden">
+              
+              {/* Carousel */}
+              <div className="relative aspect-video rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-950">
+                <img src={getCloudinaryUrl(selectedEquipment.fotos[currentImageIndex] || selectedEquipment.foto_capa_url, 800)} className="w-full h-full object-contain" />
+                
+                {selectedEquipment.fotos.length > 1 && (
+                  <>
+                    <button onClick={() => setCurrentImageIndex((c) => (c - 1 + selectedEquipment.fotos.length) % selectedEquipment.fotos.length)} className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/50 backdrop-blur"><ChevronLeft /></button>
+                    <button onClick={() => setCurrentImageIndex((c) => (c + 1) % selectedEquipment.fotos.length)} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/50 backdrop-blur"><ChevronRight /></button>
+                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+                      {selectedEquipment.fotos.map((_, i) => <div key={i} className={`h-1.5 w-1.5 rounded-full ${i === currentImageIndex ? 'bg-[#7CFF01]' : 'bg-zinc-300'}`} />)}
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              <h3 className="text-xl font-black mt-4">{selectedEquipment.nome}</h3>
+              <div className="mt-2">
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
+                  {selectedEquipment.categoria}
+                </span>
+              </div>
+              <p className="text-sm text-gray-500 mt-2">{selectedEquipment.descricao}</p>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Slide-over Right Side Form Panel for Creation & Edition */}
       <AnimatePresence>
         {isPanelOpen && (
@@ -719,65 +769,32 @@ export default function EquipmentScreen() {
                     
                     {/* Visual Photo Upload Field */}
                     <div className="space-y-2">
-                      <label className="text-[10px] uppercase font-bold tracking-wider text-gray-500 dark:text-zinc-400 block">
-                        Foto / Visual do Equipamento
-                      </label>
-
-                      <div className="flex flex-col sm:flex-row items-center gap-4 p-4 rounded-2xl border border-dashed border-gray-200 dark:border-zinc-800 bg-zinc-50/20">
-                        <div className="relative shrink-0 w-24 h-24 rounded-xl overflow-hidden bg-gray-100 dark:bg-zinc-950 border border-gray-150 dark:border-zinc-850">
-                          <img
-                            referrerPolicy="no-referrer"
-                            src={formFotoUrl || 'https://res.cloudinary.com/dnatvwcxy/image/upload/v1779424576/logo_arthur_luz_e_som_lbrpth.jpg'}
-                            alt="Preview de Imagem"
-                            className="w-full h-full object-cover"
-                          />
-                          {isUploading && (
-                            <div className="absolute inset-0 bg-zinc-950/70 flex items-center justify-center">
-                              <RefreshCw className="h-5 w-5 text-[#7CFF01] animate-spin" />
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex-1 w-full text-center sm:text-left space-y-1.5">
-                          <p className="text-xs font-black text-gray-900 dark:text-white">Selecione uma imagem para upload</p>
-                          <p className="text-[10px] text-gray-400 dark:text-zinc-500 leading-normal">
-                            Carregado diretamente na pasta segura do Cloudinary. Se omitida, usaremos o logo ARM padrão.
-                          </p>
-
-                          <input
-                            type="file"
-                            ref={fileInputRef}
-                            className="hidden"
-                            accept="image/*"
-                            onChange={(e) => {
-                              const f = e.target.files?.[0];
-                              if (f) handleImageUpload(f);
-                            }}
-                          />
-
-                          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => fileInputRef.current?.click()}
-                              disabled={isUploading}
-                              className="active-click flex h-8 items-center justify-center gap-1.5 px-3 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-[10px] font-extrabold text-gray-800 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50"
-                            >
-                              <Upload className="h-3 w-3" />
-                              <span>{isUploading ? 'Enviando...' : 'Carregar Imagem'}</span>
-                            </button>
-
-                            {formFotoUrl && (
-                              <button
-                                type="button"
-                                onClick={() => setFormFotoUrl('')}
-                                className="h-8 px-2.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 text-[10px] font-extrabold dark:border-red-950/20 dark:hover:bg-red-950/20"
-                              >
-                                Limpar
-                              </button>
-                            )}
-                          </div>
-                        </div>
+                       <label className="text-[10px] uppercase font-bold tracking-wider text-gray-500 dark:text-zinc-400 block">
+                         Fotos do Equipamento
+                       </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {formFotos.map((url, idx) => (
+                           <div key={url} className="relative aspect-square rounded-xl overflow-hidden group border-2 border-transparent">
+                             <img src={getCloudinaryUrl(url, 160)} alt={`Equipamento ${idx}`} className="w-full h-full object-cover" />
+                             {/* Cover badge */}
+                             {formFotoCapaUrl === url && (
+                               <div className="absolute top-1 left-1 bg-[#7CFF01] text-gray-950 text-[8px] font-black px-1.5 rounded-md">Capa</div>
+                             )}
+                             {/* Controls */}
+                             <div className="absolute inset-0 bg-zinc-950/50 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-1">
+                               <button type="button" onClick={() => setFormFotoCapaUrl(url)} className="p-1 rounded-full bg-white text-gray-900 hover:text-[#7CFF01]"><Star className="h-3 w-3" /></button>
+                               <button type="button" onClick={() => {
+                                 const next = formFotos.filter(f => f !== url);
+                                 setFormFotos(next);
+                                 if (formFotoCapaUrl === url) setFormFotoCapaUrl(next[0] || '');
+                               }} className="p-1 rounded-full bg-red-500 text-white"><X className="h-3 w-3" /></button>
+                             </div>
+                           </div>
+                        ))}
+                        <button type="button" onClick={() => fileInputRef.current?.click()} className="aspect-square rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center text-gray-400 hover:border-[#7CFF01] hover:text-[#7CFF01]"><Plus className="h-6 w-6" /></button>
                       </div>
+                      
+                      <input type="file" ref={fileInputRef} className="hidden" accept="image/*" multiple onChange={(e) => handleImagesUpload(e.target.files)} />
                     </div>
 
                     {/* Standard text inputs info */}

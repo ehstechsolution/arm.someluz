@@ -4,7 +4,8 @@ import {
   LogOut, Sun, Moon, Building, Check, 
   X, User, Phone, Mail, Camera, UploadCloud,
   RotateCw, Sliders, ZoomIn, RefreshCw, Shield,
-  CreditCard, MapPin, Search, Instagram, Youtube, Facebook
+  CreditCard, MapPin, Search, Instagram, Youtube, Facebook,
+  Calendar, Plus, Trash2, Clock, ChevronDown
 } from 'lucide-react';
 import { Theme } from '../types';
 import { 
@@ -15,6 +16,7 @@ import {
   handleFirestoreError, 
   OperationType 
 } from '../firebase';
+import { collection, onSnapshot, deleteDoc } from 'firebase/firestore';
 
 interface SettingsProps {
   userId: string | null;
@@ -145,8 +147,295 @@ export default function SettingsScreen({
   const [profileError, setProfileError] = useState('');
 
   // General Settings States
+  const [openSections, setOpenSections] = useState({
+    profile: false,
+    theme: false,
+    company: false,
+    whatsapp: false,
+    displacement: false,
+    agenda: false,
+  });
+
+  const toggleSection = (key: keyof typeof openSections) => {
+    setOpenSections(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
+
   const [companyDetails, setCompanyDetails] = useState(() => localStorage.getItem('als_company_details') || 'Arthur Luz e Som LTDA | CNPJ: 45.123.888/0001-90');
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // WhatsApp Integration States
+  const [isWhatsappConnected, setIsWhatsappConnected] = useState(() => {
+    return localStorage.getItem('als_whatsapp_connected') === 'true';
+  });
+  const [isConnectingWhatsapp, setIsConnectingWhatsapp] = useState(false);
+  const [isDisconnectingWhatsapp, setIsDisconnectingWhatsapp] = useState(false);
+  const [whatsappQrBase64, setWhatsappQrBase64] = useState<string | null>(null);
+  const [whatsappCode, setWhatsappCode] = useState<string | null>(null);
+  const [whatsappCodeCopied, setWhatsappCodeCopied] = useState(false);
+  const [whatsappTimer, setWhatsappTimer] = useState(30);
+  const [isWaitingForWhatsappValidation, setIsWaitingForWhatsappValidation] = useState(false);
+  const [whatsappFeedback, setWhatsappFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Firestore config/conexao values
+  const [whatsappName, setWhatsappName] = useState('Whatsapp Corporativo');
+  const [whatsappFoto, setWhatsappFoto] = useState('https://cdn-icons-png.flaticon.com/512/3536/3536445.png');
+  const [whatsappNumero, setWhatsappNumero] = useState('Status: desconectado');
+
+  // Load WhatsApp active settings from Firestore dynamically
+  useEffect(() => {
+    const db = getFirebaseDb();
+    if (!db) return;
+
+    const docRef = doc(db, 'config', 'conexao');
+    const unsub = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.name !== undefined) setWhatsappName(data.name);
+        if (data.foto !== undefined) setWhatsappFoto(data.foto);
+        if (data.numero !== undefined) setWhatsappNumero(data.numero);
+        if (data.status !== undefined) {
+          setIsWhatsappConnected(data.status);
+          localStorage.setItem('als_whatsapp_connected', String(data.status));
+        }
+      }
+    }, (err) => {
+      console.warn("Erro ao buscar as configurações do WhatsApp do Firestore:", err);
+    });
+
+    return () => unsub();
+  }, []);
+
+  // WhatsApp countdown mechanism
+  useEffect(() => {
+    let timerId: any = null;
+    if (isWaitingForWhatsappValidation && whatsappTimer > 0) {
+      timerId = setInterval(() => {
+        setWhatsappTimer((prev) => prev - 1);
+      }, 1000);
+    } else if (isWaitingForWhatsappValidation && whatsappTimer === 0) {
+      verifyWhatsappConnection();
+    }
+
+    return () => {
+      if (timerId) clearInterval(timerId);
+    };
+  }, [isWaitingForWhatsappValidation, whatsappTimer]);
+
+  const handleConnectByCode = () => {
+    if (!whatsappCode) return;
+    navigator.clipboard.writeText(whatsappCode);
+    setWhatsappCodeCopied(true);
+    setTimeout(() => setWhatsappCodeCopied(false), 2000);
+
+    const isLink = whatsappCode.startsWith('http') || whatsappCode.startsWith('whatsapp:');
+    if (isLink) {
+      window.open(whatsappCode, '_blank');
+    }
+  };
+
+  const startWhatsappConnection = async () => {
+    setWhatsappFeedback(null);
+    setIsConnectingWhatsapp(true);
+    setWhatsappQrBase64(null);
+    setWhatsappCode(null);
+    setWhatsappCodeCopied(false);
+    setIsWaitingForWhatsappValidation(false);
+
+    try {
+      const response = await fetch('https://webhook.ehstech.com.br/webhook/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ origem: "conexao" })
+      });
+
+      if (!response.ok) {
+        throw new Error('Server error starting connection: ' + response.status);
+      }
+
+      const data = await response.json();
+      if (data && (data.base64 || data.codigo)) {
+        if (data.base64) {
+          let b64 = data.base64;
+          if (!b64.startsWith('data:image')) {
+            b64 = `data:image/png;base64,${b64}`;
+          }
+          setWhatsappQrBase64(b64);
+        }
+        if (data.codigo) {
+          setWhatsappCode(data.codigo);
+        }
+        setWhatsappTimer(30);
+        setIsWaitingForWhatsappValidation(true);
+      } else {
+        throw new Error('Nenhum QR Code ou código retornado.');
+      }
+    } catch (err) {
+      console.error('Error starting WhatsApp connection:', err);
+      setWhatsappFeedback({
+        type: 'error',
+        message: 'Não foi possível se conectar. Por favor, tente novamente.'
+      });
+    } finally {
+      setIsConnectingWhatsapp(false);
+    }
+  };
+
+  const verifyWhatsappConnection = async () => {
+    setIsConnectingWhatsapp(true);
+    setIsWaitingForWhatsappValidation(false);
+    setWhatsappFeedback(null);
+
+    try {
+      const response = await fetch('https://webhook.ehstech.com.br/webhook/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ origem: "conectado" })
+      });
+
+      if (!response.ok) {
+        throw new Error('Server error verifying connection: ' + response.status);
+      }
+
+      const data = await response.json();
+      if (data && data.conectado === true) {
+        setIsWhatsappConnected(true);
+        localStorage.setItem('als_whatsapp_connected', 'true');
+
+        // Save status in firebase
+        const db = getFirebaseDb();
+        if (db) {
+          try {
+            await setDoc(doc(db, 'config', 'conexao'), {
+              status: true
+            }, { merge: true });
+          } catch (firebaseErr) {
+            console.error("Erro ao salvar status no Firestore:", firebaseErr);
+          }
+        }
+
+        setWhatsappFeedback({
+          type: 'success',
+          message: 'Whatsapp conectado com sucesso e pronto para as automações.'
+        });
+      } else {
+        setIsWhatsappConnected(false);
+        localStorage.setItem('als_whatsapp_connected', 'false');
+
+        // Save status in firebase
+        const db = getFirebaseDb();
+        if (db) {
+          try {
+            await setDoc(doc(db, 'config', 'conexao'), {
+              status: false
+            }, { merge: true });
+          } catch (firebaseErr) {
+            console.error("Erro ao salvar status no Firestore:", firebaseErr);
+          }
+        }
+
+        setWhatsappFeedback({
+          type: 'error',
+          message: 'Não foi possível se conectar. Por favor, tente novamente.'
+        });
+      }
+    } catch (err) {
+      console.error('Error verifying connection:', err);
+      setIsWhatsappConnected(false);
+      localStorage.setItem('als_whatsapp_connected', 'false');
+
+      // Save status in firebase
+      const db = getFirebaseDb();
+      if (db) {
+        try {
+          await setDoc(doc(db, 'config', 'conexao'), {
+            status: false
+          }, { merge: true });
+        } catch (firebaseErr) {
+          console.error("Erro ao salvar status no Firestore:", firebaseErr);
+        }
+      }
+
+      setWhatsappFeedback({
+        type: 'error',
+        message: 'Não foi possível se conectar. Por favor, tente novamente.'
+      });
+    } finally {
+      setIsConnectingWhatsapp(false);
+      setWhatsappQrBase64(null);
+      setWhatsappCode(null);
+    }
+  };
+
+  const disconnectWhatsapp = async () => {
+    setIsDisconnectingWhatsapp(true);
+    setWhatsappFeedback(null);
+
+    try {
+      const response = await fetch('https://webhook.ehstech.com.br/webhook/config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ origem: "desconectar" })
+      });
+
+      if (!response.ok) {
+        throw new Error('Server error disconnecting: ' + response.status);
+      }
+
+      // Save status of false in firebase
+      const db = getFirebaseDb();
+      if (db) {
+        try {
+          await setDoc(doc(db, 'config', 'conexao'), {
+            status: false
+          }, { merge: true });
+        } catch (firebaseErr) {
+          console.error("Erro ao atualizar status no Firestore:", firebaseErr);
+        }
+      }
+
+      setIsWhatsappConnected(false);
+      localStorage.setItem('als_whatsapp_connected', 'false');
+
+      setWhatsappFeedback({
+        type: 'success',
+        message: 'Whatsapp desconectado com sucesso. Recarregando página...'
+      });
+
+      // Show the disconnecting animation briefly and then reload the page
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+
+    } catch (err) {
+      console.error('Error disconnecting WhatsApp:', err);
+      // Fallback update status anyway to clear local
+      setIsWhatsappConnected(false);
+      localStorage.setItem('als_whatsapp_connected', 'false');
+      
+      setWhatsappFeedback({
+        type: 'error',
+        message: 'Erro ao se comunicar com o servidor. Desconexão local efetuada.'
+      });
+      setIsDisconnectingWhatsapp(false);
+    }
+  };
+
+  const handleToggleWhatsapp = () => {
+    if (isWhatsappConnected) {
+      disconnectWhatsapp();
+    } else {
+      startWhatsappConnection();
+    }
+  };
 
   // New persistent Firebase Company Config States
   const [companyNomeFantasia, setCompanyNomeFantasia] = useState('Arthur Luz e Som');
@@ -200,6 +489,21 @@ export default function SettingsScreen({
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [isUploadingToCloudinary, setIsUploadingToCloudinary] = useState(false);
   const [cloudinaryUploadedUrl, setCloudinaryUploadedUrl] = useState<string | null>(null);
+
+  // Agenda Corporativa (Dias de Trabalho e Holidays/Blocked dates) States
+  const [weeklyAgenda, setWeeklyAgenda] = useState<{ dia: string; ativo: boolean }[]>([
+    { dia: 'Segunda', ativo: false },
+    { dia: 'Terça', ativo: false },
+    { dia: 'Quarta', ativo: false },
+    { dia: 'Quinta', ativo: false },
+    { dia: 'Sexta', ativo: false },
+    { dia: 'Sábado', ativo: false },
+    { dia: 'Domingo', ativo: false }
+  ]);
+  const [holidays, setHolidays] = useState<{ id: string; data_holiday: string; ativo: boolean }[]>([]);
+  const [isLoadingHolidays, setIsLoadingHolidays] = useState(false);
+  const [newHolidayDate, setNewHolidayDate] = useState('');
+  const [isSavingHoliday, setIsSavingHoliday] = useState(false);
 
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
@@ -269,6 +573,144 @@ export default function SettingsScreen({
 
     loadCitiesConfig();
   }, [userProfile.nivelAcesso]);
+
+  // Load agenda semanal (dias de trabalho) de config/agenda
+  useEffect(() => {
+    if (userProfile.nivelAcesso !== 'Administrador') return;
+    const db = getFirebaseDb();
+    if (!db) return;
+
+    const docRef = doc(db, 'config', 'agenda');
+    const unsub = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (Array.isArray(data.dias)) {
+          const daysMap = new Map(data.dias.map((d: any) => [d.dia, d.ativo === true]));
+          const mergedAgenda = [
+            { dia: 'Segunda', ativo: daysMap.get('Segunda') || false },
+            { dia: 'Terça', ativo: daysMap.get('Terça') || false },
+            { dia: 'Quarta', ativo: daysMap.get('Quarta') || false },
+            { dia: 'Quinta', ativo: daysMap.get('Quinta') || false },
+            { dia: 'Sexta', ativo: daysMap.get('Sexta') || false },
+            { dia: 'Sábado', ativo: daysMap.get('Sábado') || false },
+            { dia: 'Domingo', ativo: daysMap.get('Domingo') || false }
+          ];
+          setWeeklyAgenda(mergedAgenda);
+        }
+      }
+    }, (err) => {
+      console.warn("Erro ao buscar as configurações de agenda do Firestore:", err);
+    });
+
+    return () => unsub();
+  }, [userProfile.nivelAcesso]);
+
+  // Load blocked calendar dates (holiday subcollection) from config/agenda/holiday/*
+  useEffect(() => {
+    if (userProfile.nivelAcesso !== 'Administrador') return;
+    const db = getFirebaseDb();
+    if (!db) return;
+
+    setIsLoadingHolidays(true);
+    const q = collection(db, 'config', 'agenda', 'holiday');
+    const unsub = onSnapshot(q, (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        list.push({
+          id: doc.id,
+          data_holiday: data.data_holiday || '',
+          ativo: data.ativo !== false
+        });
+      });
+      list.sort((a, b) => a.data_holiday.localeCompare(b.data_holiday));
+      setHolidays(list);
+      setIsLoadingHolidays(false);
+    }, (err) => {
+      console.error("Erro ao carregar a lista de folgas/holidays do Firestore:", err);
+      setIsLoadingHolidays(false);
+    });
+
+    return () => unsub();
+  }, [userProfile.nivelAcesso]);
+
+  // Toggle a day of the week & save immediately
+  const handleToggleDay = async (diaName: string, currentAtivo: boolean) => {
+    const updated = weeklyAgenda.map(item => 
+      item.dia === diaName ? { ...item, ativo: !currentAtivo } : item
+    );
+    setWeeklyAgenda(updated);
+
+    const db = getFirebaseDb();
+    if (db) {
+      try {
+        const docRef = doc(db, 'config', 'agenda');
+        await setDoc(docRef, { dias: updated }, { merge: true });
+      } catch (err) {
+        console.error("Erro ao salvar agenda semanal:", err);
+      }
+    }
+  };
+
+  // Add specific blocked date (holiday)
+  const handleAddHoliday = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newHolidayDate) return;
+
+    const db = getFirebaseDb();
+    if (db) {
+      setIsSavingHoliday(true);
+      try {
+        const hId = 'holiday_' + new Date(newHolidayDate).getTime() + '_' + Math.random().toString(36).substring(2, 6);
+        const docRef = doc(db, 'config', 'agenda', 'holiday', hId);
+        await setDoc(docRef, {
+          data_holiday: newHolidayDate,
+          ativo: true
+        });
+        setNewHolidayDate('');
+      } catch (err) {
+        console.error("Erro ao salvar folga no Firestore:", err);
+      } finally {
+        setIsSavingHoliday(false);
+      }
+    } else {
+      const hId = 'local_' + Date.now();
+      const updated = [...holidays, { id: hId, data_holiday: newHolidayDate, ativo: true }];
+      updated.sort((a, b) => a.data_holiday.localeCompare(b.data_holiday));
+      setHolidays(updated);
+      setNewHolidayDate('');
+    }
+  };
+
+  // Toggle holiday status (ativo/inativo)
+  const handleToggleHolidayActive = async (id: string, currentAtivo: boolean) => {
+    const db = getFirebaseDb();
+    if (db) {
+      try {
+        const docRef = doc(db, 'config', 'agenda', 'holiday', id);
+        await setDoc(docRef, { ativo: !currentAtivo }, { merge: true });
+      } catch (err) {
+        console.error("Erro ao atualizar data de folga:", err);
+      }
+    } else {
+      setHolidays(prev => prev.map(h => h.id === id ? { ...h, ativo: !currentAtivo } : h));
+    }
+  };
+
+  // Delete a blocked custom holiday
+  const handleDeleteHoliday = async (id: string) => {
+    const db = getFirebaseDb();
+    if (db) {
+      try {
+        const docRef = doc(db, 'config', 'agenda', 'holiday', id);
+        await deleteDoc(docRef);
+      } catch (err) {
+        console.error("Erro ao excluir folga do Firestore:", err);
+      }
+    } else {
+      setHolidays(prev => prev.filter(h => h.id !== id));
+    }
+  };
 
   // Sync state with settings screen initialization
   const openEditModal = () => {
@@ -889,92 +1331,116 @@ export default function SettingsScreen({
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col gap-4 rounded-2xl border border-gray-150 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60"
+        className="flex flex-col gap-4 rounded-2xl border border-gray-150 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60 transition-all cursor-pointer"
+        onClick={() => toggleSection('profile')}
       >
-        <div className="flex items-start gap-4">
-          <div className="relative shrink-0">
-            {userProfile.avatar ? (
-              <img 
-                referrerPolicy="no-referrer"
-                src={userProfile.avatar} 
-                alt="Avatar" 
-                className="h-16 w-16 rounded-full border-2 border-primary object-cover shadow-xs"
-              />
-            ) : (
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/20 text-primary font-extrabold text-xl border-2 border-primary shadow-xs">
-                {userProfile.email ? userProfile.email.charAt(0).toUpperCase() : 'A'}
-              </div>
-            )}
-            <span className="absolute bottom-1 right-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-green-500 dark:border-zinc-900"></span>
-          </div>
-
-          <div className="space-y-2 min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[9px] font-bold uppercase text-primary tracking-wider bg-primary/5 px-2 py-0.5 rounded-md border border-primary/10">
-                Operador Autenticado
-              </span>
-              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700">
-                {userProfile.nivelAcesso || 'Equipe'}
-              </span>
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+              <User className="h-4 w-4" />
             </div>
-            
             <div>
-              <h3 className="text-base font-extrabold text-gray-900 dark:text-white leading-tight truncate">
-                {userProfile.nome}
-              </h3>
-              <p className="text-[11px] text-gray-500 dark:text-zinc-400 font-mono flex items-center gap-1 mt-0.5">
-                <Mail className="h-3 w-3 text-gray-400 shrink-0" />
-                <span className="truncate">{userProfile.email}</span>
-              </p>
+              <h4 className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-zinc-200">
+                Perfil do Operador
+              </h4>
+              {!openSections.profile && (
+                <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-bold">
+                  {userProfile.nome} ({userProfile.email})
+                </p>
+              )}
             </div>
           </div>
+          <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${openSections.profile ? 'rotate-180' : ''}`} />
         </div>
 
-        {/* Informações adicionais em Grid para melhor leitura em Mobile */}
-        {(userProfile.telefone || userProfile.cpf) && (
-          <div className="grid grid-cols-2 gap-2 border-t border-gray-100 dark:border-zinc-800/80 pt-3 text-[11px]">
-            {userProfile.telefone && (
-              <div className="bg-gray-50/50 dark:bg-zinc-900/50 p-2 rounded-xl border border-gray-100/50 dark:border-zinc-800/40">
-                <p className="text-[9px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">Telefone</p>
-                <span className="font-semibold text-gray-850 dark:text-zinc-200 flex items-center gap-1 truncate">
-                  <Phone className="h-3 w-3 text-secondary shrink-0" />
-                  {userProfile.telefone}
-                </span>
+        {openSections.profile && (
+          <div className="space-y-4 pt-2 border-t border-gray-100 dark:border-zinc-800/50" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-4">
+              <div className="relative shrink-0">
+                {userProfile.avatar ? (
+                  <img 
+                    referrerPolicy="no-referrer"
+                    src={userProfile.avatar} 
+                    alt="Avatar" 
+                    className="h-16 w-16 rounded-full border-2 border-primary object-cover shadow-xs"
+                  />
+                ) : (
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/20 text-primary font-extrabold text-xl border-2 border-primary shadow-xs">
+                    {userProfile.email ? userProfile.email.charAt(0).toUpperCase() : 'A'}
+                  </div>
+                )}
+                <span className="absolute bottom-1 right-1 h-3.5 w-3.5 rounded-full border-2 border-white bg-green-500 dark:border-zinc-900"></span>
               </div>
-            )}
-            {userProfile.cpf && (
-              <div className="bg-gray-50/50 dark:bg-zinc-900/50 p-2 rounded-xl border border-gray-100/50 dark:border-zinc-800/40">
-                <p className="text-[9px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">CPF</p>
-                <span className="font-mono font-semibold text-gray-855 dark:text-zinc-200 flex items-center gap-1 truncate">
-                  <CreditCard className="h-3 w-3 text-primary shrink-0" />
-                  {userProfile.cpf}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
 
-        {userProfile.endereco && (
-          <div className="border-t border-gray-100 dark:border-zinc-800/80 pt-3">
-            <p className="text-[9px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Endereço Registrado</p>
-            <div className="bg-gray-50/50 dark:bg-zinc-900/50 p-2.5 rounded-xl border border-gray-100/50 dark:border-zinc-800/40 flex items-start gap-2">
-              <MapPin className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
-              <span className="text-[11px] text-gray-700 dark:text-zinc-300 leading-relaxed min-w-0 flex-1">
-                {userProfile.endereco}
-              </span>
+              <div className="space-y-2 min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[9px] font-bold uppercase text-primary tracking-wider bg-primary/5 px-2 py-0.5 rounded-md border border-primary/10">
+                    Operador Autenticado
+                  </span>
+                  <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700">
+                    {userProfile.nivelAcesso || 'Equipe'}
+                  </span>
+                </div>
+                
+                <div>
+                  <h3 className="text-base font-extrabold text-gray-900 dark:text-white leading-tight truncate">
+                    {userProfile.nome}
+                  </h3>
+                  <p className="text-[11px] text-gray-500 dark:text-zinc-400 font-mono flex items-center gap-1 mt-0.5">
+                    <Mail className="h-3 w-3 text-gray-400 shrink-0" />
+                    <span className="truncate">{userProfile.email}</span>
+                  </p>
+                </div>
+              </div>
             </div>
+
+            {/* Informações adicionais em Grid para melhor leitura em Mobile */}
+            {(userProfile.telefone || userProfile.cpf) && (
+              <div className="grid grid-cols-2 gap-2 border-t border-gray-100 dark:border-zinc-800/80 pt-3 text-[11px]">
+                {userProfile.telefone && (
+                  <div className="bg-gray-50/50 dark:bg-zinc-900/50 p-2 rounded-xl border border-gray-100/50 dark:border-zinc-800/40">
+                    <p className="text-[9px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">Telefone</p>
+                    <span className="font-semibold text-gray-850 dark:text-zinc-200 flex items-center gap-1 truncate">
+                      <Phone className="h-3 w-3 text-secondary shrink-0" />
+                      {userProfile.telefone}
+                    </span>
+                  </div>
+                )}
+                {userProfile.cpf && (
+                  <div className="bg-gray-50/50 dark:bg-zinc-900/50 p-2 rounded-xl border border-gray-100/50 dark:border-zinc-800/40">
+                    <p className="text-[9px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">CPF</p>
+                    <span className="font-mono font-semibold text-gray-855 dark:text-zinc-200 flex items-center gap-1 truncate">
+                      <CreditCard className="h-3 w-3 text-primary shrink-0" />
+                      {userProfile.cpf}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {userProfile.endereco && (
+              <div className="border-t border-gray-100 dark:border-zinc-800/80 pt-3">
+                <p className="text-[9px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Endereço Registrado</p>
+                <div className="bg-gray-50/50 dark:bg-zinc-900/50 p-2.5 rounded-xl border border-gray-100/50 dark:border-zinc-800/40 flex items-start gap-2">
+                  <MapPin className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                  <span className="text-[11px] text-gray-700 dark:text-zinc-300 leading-relaxed min-w-0 flex-1">
+                    {userProfile.endereco}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Edit Profile Action Trigger */}
+            <button
+              onClick={openEditModal}
+              id="btn-edit-profile-trigger"
+              className="active-click flex w-full h-10 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50/50 hover:bg-gray-100 text-xs font-bold text-gray-800 transition-all dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300 dark:hover:bg-zinc-900"
+            >
+              <Camera className="h-4 w-4 text-primary" />
+              <span>Editar perfil</span>
+            </button>
           </div>
         )}
-
-        {/* Edit Profile Action Trigger */}
-        <button
-          onClick={openEditModal}
-          id="btn-edit-profile-trigger"
-          className="active-click flex w-full h-10 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-gray-50/50 hover:bg-gray-100 text-xs font-bold text-gray-800 transition-all dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-300 dark:hover:bg-zinc-900"
-        >
-          <Camera className="h-4 w-4 text-primary" />
-          <span>Editar perfil</span>
-        </button>
       </motion.div>
 
       {/* Main Configurations Block */}
@@ -984,33 +1450,55 @@ export default function SettingsScreen({
         </h4>
 
         {/* Theme select panel (Aesthetic) */}
-        <div className="rounded-2xl border border-gray-150 bg-white p-4 shadow-xs dark:border-zinc-800 dark:bg-zinc-900/40">
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <h5 className="text-xs font-bold text-gray-950 dark:text-white">Estética do Tema</h5>
-              <p className="text-[10px] text-gray-500 dark:text-zinc-400">
-                Alternar entre Tema Escuro e Claro
-              </p>
+        <div className="rounded-2xl border border-gray-150 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60 transition-all">
+          <div 
+            className="flex items-center justify-between cursor-pointer select-none"
+            onClick={() => toggleSection('theme')}
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="h-8 w-8 rounded-lg bg-orange-500/10 flex items-center justify-center text-orange-500">
+                {theme === 'dark' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+              </div>
+              <div>
+                <h5 className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-zinc-200">Aparência do Tema</h5>
+                {!openSections.theme && (
+                  <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-bold">
+                    Tema Atual: {theme === 'dark' ? 'Escuro' : 'Claro'}
+                  </p>
+                )}
+              </div>
             </div>
-            
-            <button
-              onClick={onThemeToggle}
-              id="theme-toggler"
-              className="active-click flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-800 transition-all hover:bg-gray-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
-            >
-              {theme === 'dark' ? (
-                <>
-                  <Moon className="h-4 w-4 text-primary" />
-                  <span>Tema Escuro</span>
-                </>
-              ) : (
-                <>
-                  <Sun className="h-4 w-4 text-secondary" />
-                  <span>Tema Claro</span>
-                </>
-              )}
-            </button>
+            <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${openSections.theme ? 'rotate-180' : ''}`} />
           </div>
+
+          {openSections.theme && (
+            <div className="pt-4 mt-3 border-t border-gray-100 dark:border-zinc-850 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
+              <div className="space-y-1">
+                <h5 className="text-xs font-bold text-gray-950 dark:text-white">Estética do Tema</h5>
+                <p className="text-[10px] text-gray-500 dark:text-zinc-400">
+                  Alternar entre Tema Escuro e Claro
+                </p>
+              </div>
+              
+              <button
+                onClick={onThemeToggle}
+                id="theme-toggler"
+                className="active-click flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-800 transition-all hover:bg-gray-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
+              >
+                {theme === 'dark' ? (
+                  <>
+                    <Moon className="h-4 w-4 text-primary" />
+                    <span>Tema Escuro</span>
+                  </>
+                ) : (
+                  <>
+                    <Sun className="h-4 w-4 text-secondary" />
+                    <span>Tema Claro</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Company configuration */}
@@ -1023,7 +1511,30 @@ export default function SettingsScreen({
                 animate={{ opacity: 1, y: 0 }}
                 className="flex flex-col gap-4 rounded-2xl border border-gray-150 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60"
               >
-                <div className="flex items-start gap-4">
+                {/* Collapsible Header */}
+                <div 
+                  className={`flex items-center justify-between cursor-pointer select-none ${openSections.company ? 'pb-3 border-b border-gray-100 dark:border-zinc-850' : ''}`}
+                  onClick={() => toggleSection('company')}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-500">
+                      <Building className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-zinc-200">Dados da Empresa</h5>
+                      {!openSections.company ? (
+                        <p className="text-[10px] text-gray-450 dark:text-zinc-400 font-bold">{companyNomeFantasia || 'Arthur Luz e Som'}</p>
+                      ) : (
+                        <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-bold">Dados corporativos e logotipo</p>
+                      )}
+                    </div>
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${openSections.company ? 'rotate-180' : ''}`} />
+                </div>
+
+                {openSections.company && (
+                  <>
+                    <div className="flex items-start gap-4">
                   <div className="relative shrink-0">
                     {companyLogo ? (
                       <img 
@@ -1134,24 +1645,45 @@ export default function SettingsScreen({
                   <Building className="h-4 w-4 text-primary" />
                   <span>Editar Datos da Empresa</span>
                 </button>
+                  </>
+                )}
               </motion.div>
             ) : (
               /* Live editing form mode matching exact style and fields */
               <form onSubmit={handleSaveCompanyData} className="space-y-4">
                 <div className="rounded-2xl border border-gray-150 bg-white p-5 shadow-xs dark:border-zinc-800 dark:bg-zinc-900/40">
-                  <div className="border-b border-gray-100 pb-3 mb-4 dark:border-zinc-800/80 flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] uppercase font-extrabold tracking-wider text-primary">Painel de Ajuste</span>
-                      <h4 className="text-sm font-bold text-gray-900 dark:text-white mt-1">Editar Dados Corporativos</h4>
+                  {/* Collapsible Form Header */}
+                  <div 
+                    className={`flex items-center justify-between cursor-pointer select-none ${openSections.company ? 'border-b border-gray-100 pb-3 mb-4 dark:border-zinc-800/80' : ''}`}
+                    onClick={() => toggleSection('company')}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-500">
+                        <Building className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-zinc-200">Dados da Empresa</h4>
+                        {!openSections.company ? (
+                          <p className="text-[10px] text-gray-450 dark:text-zinc-400 font-bold">Editando corporativo</p>
+                        ) : (
+                          <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-bold">Modifique os dados abaixo</p>
+                        )}
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingCompany(false)}
-                      className="text-xs font-black text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200"
-                    >
-                      Voltar
-                    </button>
+                    <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingCompany(false)}
+                        className="text-xs font-black text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200 select-none pb-0.5"
+                      >
+                        Voltar
+                      </button>
+                      <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${openSections.company ? 'rotate-180' : ''}`} onClick={(e) => { e.stopPropagation(); toggleSection('company'); }} />
+                    </div>
                   </div>
+
+                  {openSections.company && (
+                    <>
 
                   {companyError && (
                     <div id="company-error-alert" className="mb-4 rounded-xl bg-red-50 p-3 text-[11px] font-semibold text-red-600 dark:bg-red-950/30 dark:text-red-400">
@@ -1368,10 +1900,13 @@ export default function SettingsScreen({
                       </div>
                     </div>
                   </div>
+                </>
+              )}
                 </div>
 
                 {/* Combined Save and Cancel configuration buttons in a row */}
-                <div className="flex gap-2">
+                {openSections.company && (
+                  <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -1403,27 +1938,265 @@ export default function SettingsScreen({
                     )}
                   </button>
                 </div>
+                )}
               </form>
             )}
 
-          {/* Displacement Calculation (Cálculo de Deslocamento) Section */}
-          <div className="rounded-2xl border border-gray-150 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-4 dark:border-zinc-800/80">
-              <div>
-                <span className="text-[10px] uppercase font-extrabold tracking-wider text-primary">Logística & Deslocamentos</span>
-                <h4 className="text-sm font-bold text-gray-900 dark:text-white mt-1">Cálculo de Deslocamento</h4>
+          {/* Sessão de Conexão com o WhatsApp */}
+          {userProfile.nivelAcesso === 'Administrador' && (
+            <div className="rounded-2xl border border-gray-150 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60 transition-all">
+              {/* Collapsible Header */}
+              <div 
+                className={`flex items-center justify-between cursor-pointer select-none ${openSections.whatsapp ? 'pb-3 border-b border-gray-100 dark:border-zinc-850' : ''}`}
+                onClick={() => toggleSection('whatsapp')}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="h-8 w-8 rounded-lg bg-green-500/10 flex items-center justify-center text-green-500">
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-zinc-200">WhatsApp</h5>
+                    {!openSections.whatsapp ? (
+                      <p className="text-[10px] text-gray-450 dark:text-zinc-400 font-bold flex items-center gap-1">
+                        Status: 
+                        {isWhatsappConnected ? (
+                          <span className="text-green-500 flex items-center gap-1 active-click">
+                            <span className="relative flex h-1.5 w-1.5 pt-0.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
+                            </span>
+                            Conectado
+                          </span>
+                        ) : (
+                          <span className="text-red-500 flex items-center gap-1 active-click">
+                            <span className="relative flex h-1.5 w-1.5 pt-0.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
+                            </span>
+                            Desconectado
+                          </span>
+                        )}
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-bold">Conexão de mensageria automática</p>
+                    )}
+                  </div>
+                </div>
+                <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${openSections.whatsapp ? 'rotate-180' : ''}`} />
               </div>
-              
-              {!isEditingCityForm && (
-                <button
-                  type="button"
-                  onClick={openAddCityForm}
-                  className="active-click rounded-lg bg-primary hover:bg-primary/95 text-gray-900 px-3 py-1.5 text-[10px] font-extrabold transition-colors shadow-xs"
-                >
-                  + Adicionar Cidade
-                </button>
+
+              {openSections.whatsapp && (
+                <div className="pt-4" onClick={(e) => e.stopPropagation()}>
+                  {!isWaitingForWhatsappValidation ? (
+                <div className="flex items-center justify-between gap-2.5 p-3.5 sm:p-4 rounded-xl border border-gray-100 bg-gray-50/20 dark:border-zinc-850 dark:bg-zinc-950/20 hover:border-gray-200 dark:hover:border-zinc-800 transition-all">
+                  <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
+                    <div className="shrink-0 flex items-center justify-center">
+                      <img 
+                        src={whatsappFoto || "https://cdn-icons-png.flaticon.com/512/3536/3536445.png"} 
+                        alt="WhatsApp Icon" 
+                        className="h-10 w-10 sm:h-12 sm:w-12 object-cover rounded-xl border border-gray-150 dark:border-zinc-800 shadow-3xs"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <h5 className="text-xs sm:text-sm font-extrabold text-gray-900 dark:text-white leading-tight truncate">
+                        {isWhatsappConnected ? `Conectado à ${whatsappName}` : whatsappName}
+                      </h5>
+                      <p className="text-[10px] sm:text-[11px] text-gray-500 dark:text-zinc-400 mt-1 flex items-center gap-1.5 font-bold">
+                        {isWhatsappConnected ? (
+                          <>
+                            <span className="relative flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500"></span>
+                            </span>
+                            <span className="truncate">{whatsappNumero || "Status: conectado"}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="relative flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500"></span>
+                            </span>
+                            <span className="truncate">{whatsappNumero || "Status: desconectado"}</span>
+                          </>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleToggleWhatsapp}
+                      disabled={isConnectingWhatsapp || isDisconnectingWhatsapp}
+                      className={`active-click px-3 sm:px-4 h-8 sm:h-9 flex items-center justify-center text-[10px] sm:text-xs font-black rounded-lg transition-all shadow-xs gap-1 sm:gap-1.5 min-w-[80px] sm:min-w-[100px] ${
+                        isConnectingWhatsapp || isDisconnectingWhatsapp
+                          ? 'bg-zinc-100 text-zinc-400 dark:bg-zinc-850 dark:text-zinc-600 cursor-not-allowed'
+                          : isWhatsappConnected
+                            ? 'bg-zinc-100 hover:bg-zinc-200 text-gray-800 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700'
+                            : 'bg-green-500 hover:bg-green-600 text-white'
+                      }`}
+                    >
+                      {isDisconnectingWhatsapp ? (
+                        <>
+                          <RefreshCw className="h-3 w-3 animate-spin text-zinc-400" />
+                          <span className="hidden xs:inline">Desconectando</span>
+                        </>
+                      ) : isConnectingWhatsapp ? (
+                        <>
+                          <RefreshCw className="h-3 w-3 animate-spin text-zinc-400" />
+                          <span className="hidden xs:inline">Processando</span>
+                        </>
+                      ) : isWhatsappConnected ? (
+                        <span>Desconectar</span>
+                      ) : (
+                        <span>Conectar</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                // WhatsApp connection sequence (QR code and remaining seconds display)
+                <div className="flex flex-col items-center justify-center p-4 border border-dashed border-gray-200 dark:border-zinc-800 rounded-xl bg-gray-50/10 dark:bg-zinc-950/10 animate-fade-in text-center">
+                  <p className="text-xs font-black text-gray-800 dark:text-zinc-200 mb-3.5 uppercase tracking-wide">
+                    Escaneie o QR Code com seu WhatsApp para Conectar
+                  </p>
+
+                  {/* QR Code Container */}
+                  <div className="relative w-44 h-44 bg-white p-2.5 rounded-2xl border border-gray-150 dark:border-zinc-800 shadow-sm flex items-center justify-center overflow-hidden">
+                    {whatsappQrBase64 ? (
+                      <img 
+                        src={whatsappQrBase64} 
+                        alt="WhatsApp QR Code" 
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <RefreshCw className="h-5 w-5 animate-spin text-green-500" />
+                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold">Obtendo Código...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Connection by Code button if exists */}
+                  {whatsappCode && (
+                    <div className="w-full max-w-xs mt-3.5 flex flex-col items-center gap-1.5 p-2 bg-gray-50/50 dark:bg-zinc-950/40 border border-gray-100 dark:border-zinc-800/60 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={handleConnectByCode}
+                        className="w-full h-8 px-3 flex items-center justify-center gap-1.5 rounded-lg bg-green-500 hover:bg-green-600 text-[10px] font-black uppercase text-white tracking-wider transition-all shadow-xs active-click font-bold"
+                      >
+                        <span>🔗</span>
+                        <span>{whatsappCodeCopied ? 'Link/Código Copiado!' : 'Conectar via Link/Código'}</span>
+                      </button>
+                      <p className="text-[9px] text-gray-550 dark:text-zinc-400 select-all break-all font-mono font-bold bg-white dark:bg-zinc-900 border border-gray-150 dark:border-zinc-800 px-2 py-1 rounded w-full">
+                        {whatsappCode}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Linear countdown gauge */}
+                  <div className="w-full max-w-xs mt-4">
+                    <div className="flex justify-between items-center text-[10px] sm:text-[11px] font-extrabold text-gray-650 dark:text-zinc-400 mb-1.5">
+                      <span>Aguardando leitura do QR Code...</span>
+                      <span className="font-mono text-green-500 font-black">{whatsappTimer}s</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-gray-100 dark:bg-zinc-850 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-green-500 transition-all duration-1000 ease-linear"
+                        style={{ width: `${(whatsappTimer / 30) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Cancel sequence */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsWaitingForWhatsappValidation(false);
+                      setWhatsappQrBase64(null);
+                      setWhatsappCode(null);
+                      setWhatsappFeedback({
+                        type: 'error',
+                        message: 'Conexão cancelada pelo usuário.'
+                      });
+                    }}
+                    className="mt-4 text-[10px] font-bold text-red-500 uppercase tracking-widest hover:text-red-650 px-3 py-1 bg-red-50 dark:bg-red-950/10 rounded-lg active-click"
+                  >
+                    Cancelar Conexão
+                  </button>
+                </div>
+              )}
+
+              {/* Notification messages (feedback) */}
+              {whatsappFeedback && (
+                <div className={`mt-3 p-3 rounded-xl border text-[11px] sm:text-xs font-bold leading-relaxed flex items-start gap-2.5 ${
+                  whatsappFeedback.type === 'success' 
+                    ? 'border-green-100 bg-green-50/50 text-green-800 dark:border-green-900/10 dark:bg-green-950/10 dark:text-green-400' 
+                    : 'border-red-100 bg-red-50/50 text-red-800 dark:border-red-900/10 dark:bg-red-950/10 dark:text-red-400'
+                }`}>
+                  <div className="shrink-0 mt-0.5">
+                    {whatsappFeedback.type === 'success' ? (
+                      <span className="text-green-500 font-extrabold text-sm">✓</span>
+                    ) : (
+                      <span className="text-red-500 font-extrabold text-sm">✕</span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p>{whatsappFeedback.message}</p>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={() => setWhatsappFeedback(null)} 
+                    className="text-gray-400 hover:text-gray-650 dark:hover:text-zinc-200 shrink-0 text-xs font-black px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+                </div>
               )}
             </div>
+          )}
+
+          {/* Displacement Calculation (Cálculo de Deslocamento) Section */}
+          <div className="rounded-2xl border border-gray-150 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60 transition-all">
+            {/* Collapsible Header */}
+            <div 
+              className={`flex items-center justify-between cursor-pointer select-none ${openSections.displacement ? 'border-b border-gray-100 pb-3 mb-4 dark:border-zinc-800/85' : ''}`}
+              onClick={() => toggleSection('displacement')}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-500">
+                  <MapPin className="h-4 w-4" />
+                </div>
+                <div>
+                  <h5 className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-zinc-200">Cálculo de Deslocamento</h5>
+                  {!openSections.displacement ? (
+                    <p className="text-[10px] text-gray-450 dark:text-zinc-400 font-bold">
+                      {cityConfigs.length} {cityConfigs.length === 1 ? 'cidade cadastrada' : 'cidades cadastradas'}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-bold">Logística de preços e regras de deslocamento</p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-3.5" onClick={(e) => e.stopPropagation()}>
+                {!isEditingCityForm && openSections.displacement && (
+                  <button
+                    type="button"
+                    onClick={openAddCityForm}
+                    className="active-click rounded-lg bg-primary hover:bg-primary/95 text-gray-900 px-3 py-1.5 text-[10px] font-extrabold transition-all shadow-xs"
+                  >
+                    + Adicionar Cidade
+                  </button>
+                )}
+                <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${openSections.displacement ? 'rotate-180' : ''}`} onClick={(e) => { e.stopPropagation(); toggleSection('displacement'); }} />
+              </div>
+            </div>
+
+            {openSections.displacement && (
+              <div onClick={(e) => e.stopPropagation()}>
 
             {citiesError && (
               <div className="mb-4 rounded-xl bg-red-500/10 p-3 text-[11px] font-semibold text-red-500 dark:bg-red-500/5">
@@ -1622,6 +2395,169 @@ export default function SettingsScreen({
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+              </div>
+            )}
+          </div>
+
+          {/* Agenda Corporativa (Working days & Holiday exceptions) Section */}
+          <div className="rounded-2xl border border-gray-150 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60 transition-all">
+            {/* Collapsible Header */}
+            <div 
+              className={`flex items-center justify-between cursor-pointer select-none ${openSections.agenda ? 'border-b border-gray-100 pb-3 mb-4 dark:border-zinc-800/85' : ''}`}
+              onClick={() => toggleSection('agenda')}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-lg bg-orange-500/10 flex items-center justify-center text-orange-500">
+                  <Calendar className="h-4 w-4" />
+                </div>
+                <div>
+                  <h5 className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-zinc-200">Agenda Corporativa</h5>
+                  {!openSections.agenda ? (
+                    <p className="text-[10px] text-gray-450 dark:text-zinc-400 font-bold">
+                      {weeklyAgenda.filter(d => d.ativo).length} dias ativos / {holidays.filter(d => d.ativo).length} bloqueios
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-bold">Dias úteis de trabalho e exceções de bloqueio</p>
+                  )}
+                </div>
+              </div>
+              <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${openSections.agenda ? 'rotate-180' : ''}`} />
+            </div>
+
+            {openSections.agenda && (
+              <div onClick={(e) => e.stopPropagation()}>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Working Days of Week List */}
+              <div className="space-y-4">
+                <div>
+                  <h5 className="text-[11px] font-extrabold uppercase text-gray-500 dark:text-zinc-400 tracking-wider">
+                    Dias da Semana para Eventos
+                  </h5>
+                  <p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
+                    Marque os dias da semana em que sua empresa realiza eventos. Mudanças são atualizadas em tempo real.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  {weeklyAgenda.map((item) => (
+                    <div 
+                      key={item.dia} 
+                      className="flex items-center justify-between p-2.5 rounded-xl border border-gray-100/80 bg-gray-50/10 dark:border-zinc-850 dark:bg-zinc-950/20 hover:border-gray-200 dark:hover:border-zinc-800 transition-all text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Clock className="h-3.5 w-3.5 text-gray-400" />
+                        <span className="font-bold text-gray-900 dark:text-zinc-200">{item.dia}</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleToggleDay(item.dia, item.ativo)}
+                        className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border border-transparent transition-colors duration-200 ease-in-out outline-none ${
+                          item.ativo ? 'bg-primary' : 'bg-gray-200 dark:bg-zinc-800'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out ${
+                            item.ativo ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Holidays list / Blocking dates exceptions */}
+              <div className="space-y-4">
+                <div>
+                  <h5 className="text-[11px] font-extrabold uppercase text-gray-500 dark:text-zinc-400 tracking-wider">
+                    Folgas & Bloqueios Específicos
+                  </h5>
+                  <p className="text-[10px] text-gray-400 mt-0.5 leading-relaxed">
+                    Insira dias específicos em que a equipe não irá trabalhar para bloquear a agenda de eventos.
+                  </p>
+                </div>
+
+                {/* Form to add manual holiday date filter */}
+                <form onSubmit={handleAddHoliday} className="flex gap-2">
+                  <input
+                    type="date"
+                    required
+                    value={newHolidayDate}
+                    onChange={(e) => setNewHolidayDate(e.target.value)}
+                    className="flex-1 rounded-xl border border-gray-200 bg-gray-50/50 p-2 text-xs outline-none focus:border-primary dark:border-zinc-800 dark:bg-zinc-900 dark:text-white"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSavingHoliday || !newHolidayDate}
+                    className="active-click rounded-xl bg-primary hover:bg-primary/95 text-gray-950 px-3 py-2 text-xs font-black transition-colors shrink-0 flex items-center gap-1 shadow-sm disabled:opacity-50"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Bloquear</span>
+                  </button>
+                </form>
+
+                {/* Listing added holiday block dates */}
+                {isLoadingHolidays ? (
+                  <div className="flex items-center justify-center py-4 gap-2">
+                    <RefreshCw className="h-4.5 w-4.5 animate-spin text-primary" />
+                    <span className="text-[10px] text-gray-400 uppercase tracking-widest font-bold">Verificando Agenda...</span>
+                  </div>
+                ) : holidays.length === 0 ? (
+                  <div className="text-center py-6 border border-dashed border-gray-150 rounded-xl bg-gray-50/20 dark:border-zinc-800">
+                    <Calendar className="h-6 w-6 text-gray-300 dark:text-zinc-700 mx-auto stroke-1" />
+                    <p className="text-[10px] font-bold text-gray-450 dark:text-zinc-500 mt-1">Nenhuma data bloqueada</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
+                    {holidays.map((hol) => {
+                      const [yr, mo, dy] = hol.data_holiday.split('-');
+                      const displayDate = yr && mo && dy ? `${dy}/${mo}/${yr}` : hol.data_holiday;
+                      
+                      return (
+                        <div 
+                          key={hol.id}
+                          className="flex items-center justify-between p-2.5 rounded-xl border border-gray-150 dark:border-zinc-850 bg-gray-50/30 dark:bg-zinc-950/20 text-xs"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse shrink-0" />
+                            <span className="font-mono font-extrabold text-gray-800 dark:text-zinc-200">{displayDate}</span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {/* Toggle Holiday Switch */}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleHolidayActive(hol.id, hol.ativo)}
+                              className={`text-[9px] font-bold px-2 py-0.5 rounded-md border ${
+                                hol.ativo 
+                                  ? 'bg-red-500/10 text-red-500 border-red-500/20 hover:bg-red-500/15 font-extrabold'
+                                  : 'bg-zinc-100 dark:bg-zinc-800 text-gray-400 border-zinc-200 dark:border-zinc-700 font-semibold'
+                              }`}
+                            >
+                              {hol.ativo ? 'Bloqueado' : 'Liberado'}
+                            </button>
+
+                            {/* Delete block date button */}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteHoliday(hol.id)}
+                              className="text-gray-400 hover:text-red-500 p-1 rounded-md"
+                              title="Remover Bloqueio"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
               </div>
             )}
           </div>
