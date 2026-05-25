@@ -183,32 +183,32 @@
       "description": "Ready-to-book combo of technical equipments and resources for events",
       "type": "object",
       "properties": {
-        "nome": {
+        "titulo": {
           "type": "string"
         },
         "descricao": {
           "type": "string"
         },
-        "preco": {
-          "type": "number"
-        },
-        "categoria": {
-          "type": "string"
-        },
-        "foto_url": {
-          "type": "string"
-        },
         "ativo": {
           "type": "boolean"
         },
-        "itens": {
+        "preco_custo_base": {
+          "type": "number"
+        },
+        "preco_venda": {
+          "type": "number"
+        },
+        "criado_em": {
+          "type": "string"
+        },
+        "equipe_tecnica": {
           "type": "array"
         },
-        "atualizado_em": {
-          "type": "string"
+        "equipamentos": {
+          "type": "array"
         }
       },
-      "required": ["nome", "preco", "ativo"]
+      "required": ["titulo", "preco_custo_base", "preco_venda", "ativo"]
     }
   },
   "firestore": {
