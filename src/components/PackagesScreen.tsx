@@ -437,6 +437,23 @@ export default function PackagesScreen() {
           equipe_tecnica: payload.equipe_tecnica,
           equipamentos: payload.equipamentos
         });
+
+        // Send POST webhook containing package data and { origem: "pacote" }
+        try {
+          await fetch('https://webhook.ehstech.com.br/webhook/config', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              ...payload,
+              origem: 'pacote'
+            })
+          });
+        } catch (webErr) {
+          console.error("Erro ao enviar webhook de pacote:", webErr);
+        }
+
         showToast('success', `Pacote "${payload.titulo}" salvo com sucesso.`);
         setIsPanelOpen(false);
       } catch (err: any) {
@@ -453,6 +470,23 @@ export default function PackagesScreen() {
         updated = [...packagesList, payload];
       }
       setPackagesList(updated);
+
+      // Send POST webhook containing package data and { origem: "pacote" } (local sandbox branch)
+      try {
+        await fetch('https://webhook.ehstech.com.br/webhook/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            ...payload,
+            origem: 'pacote'
+          })
+        });
+      } catch (webErr) {
+        console.error("Erro ao enviar webhook de pacote:", webErr);
+      }
+
       showToast('success', 'Pacote salvo localmente no sandbox.');
       setIsPanelOpen(false);
       setIsSaving(false);

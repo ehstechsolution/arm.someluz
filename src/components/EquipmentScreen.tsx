@@ -118,6 +118,23 @@ export default function EquipmentScreen() {
     if (db) {
       try {
         await setDoc(doc(db, 'equipamentos', item.id), updated);
+
+        // Send POST webhook containing equipment data and { origem: "equipamentos" }
+        try {
+          await fetch('https://webhook.ehstech.com.br/webhook/config', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              ...updated,
+              origem: 'equipamentos'
+            })
+          });
+        } catch (webErr) {
+          console.error("Erro ao enviar webhook de equipamento:", webErr);
+        }
+
         triggerToast('success', `Equipamento ${updated.nome} agora está ${updated.ativo ? 'Ativo' : 'Inativo'}!`);
       } catch (err: any) {
         console.error("Firestore toggle status error:", err);
@@ -130,6 +147,23 @@ export default function EquipmentScreen() {
       const newList = equipmentList.map(eq => eq.id === item.id ? updated : eq);
       setEquipmentList(newList);
       saveData('als_equipment_list', newList);
+
+      // Send POST webhook containing equipment data and { origem: "equipamentos" } (local sandbox branch)
+      try {
+        await fetch('https://webhook.ehstech.com.br/webhook/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            ...updated,
+            origem: 'equipamentos'
+          })
+        });
+      } catch (webErr) {
+        console.error("Erro ao enviar webhook de equipamento:", webErr);
+      }
+
       triggerToast('success', `Status de ${updated.nome} alternado localmente!`);
     }
   };
@@ -350,6 +384,23 @@ export default function EquipmentScreen() {
     if (db) {
       try {
         await setDoc(doc(db, 'equipamentos', resolvedId), equipmentPayload);
+
+        // Send POST webhook containing equipment data and { origem: "equipamentos" }
+        try {
+          await fetch('https://webhook.ehstech.com.br/webhook/config', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              ...equipmentPayload,
+              origem: 'equipamentos'
+            })
+          });
+        } catch (webErr) {
+          console.error("Erro ao enviar webhook de equipamento:", webErr);
+        }
+
         triggerToast('success', `Equipamento "${formNome}" salvo com sucesso!`);
         setIsPanelOpen(false);
       } catch (err: any) {
@@ -372,6 +423,23 @@ export default function EquipmentScreen() {
       }
       setEquipmentList(updatedList);
       saveData('als_equipment_list', updatedList);
+
+      // Send POST webhook containing equipment data and { origem: "equipamentos" } (local sandbox branch)
+      try {
+        await fetch('https://webhook.ehstech.com.br/webhook/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            ...equipmentPayload,
+            origem: 'equipamentos'
+          })
+        });
+      } catch (webErr) {
+        console.error("Erro ao enviar webhook de equipamento:", webErr);
+      }
+
       triggerToast('success', `Equipamento "${formNome}" atualizado na sandbox local!`);
       setIsPanelOpen(false);
       setIsSaving(false);

@@ -1204,6 +1204,22 @@ export default function SettingsScreen({
         // Dispatch custom update event to let App.tsx re-render header or login instantly
         window.dispatchEvent(new CustomEvent('company_config_updated', { detail: companyData }));
 
+        // Send to webhook as requested
+        try {
+          await fetch('https://webhook.ehstech.com.br/webhook/arm', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              ...companyData,
+              origem: 'config'
+            })
+          });
+        } catch (webhookErr) {
+          console.warn('Erro ao enviar dados para o webhook:', webhookErr);
+        }
+
         setCompanySuccess(true);
         setIsEditingCompany(false);
         setTimeout(() => setCompanySuccess(false), 3000);
@@ -1224,6 +1240,22 @@ export default function SettingsScreen({
       
       // Dispatch custom update event
       window.dispatchEvent(new CustomEvent('company_config_updated', { detail: companyData }));
+
+      // Send to webhook as requested
+      try {
+        await fetch('https://webhook.ehstech.com.br/webhook/arm', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            ...companyData,
+            origem: 'config'
+          })
+        });
+      } catch (webhookErr) {
+        console.warn('Erro ao enviar dados para o webhook:', webhookErr);
+      }
 
       setCompanySuccess(true);
       setIsEditingCompany(false);
@@ -1582,7 +1614,7 @@ export default function SettingsScreen({
                 {/* Sede da Empresa */}
                 {(companyCep || companyEndereco) && (
                   <div className="border-t border-gray-100 dark:border-zinc-800/80 pt-3">
-                    <p className="text-[9px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Sede Coorporativa</p>
+                    <p className="text-[9px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-1">Sede Corporativa</p>
                     <div className="bg-gray-50/50 dark:bg-zinc-900/50 p-2.5 rounded-xl border border-gray-100/50 dark:border-zinc-800/40 flex items-start gap-2">
                       <MapPin className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
                       <div className="text-[11px] text-gray-700 dark:text-zinc-300 leading-relaxed min-w-0 flex-1">
@@ -1812,8 +1844,31 @@ export default function SettingsScreen({
                             <input
                               type="text"
                               value={companyCep}
-                              onChange={(e) => setCompanyCep(formatCep(e.target.value))}
-                              placeholder="00000-050"
+                              onChange={async (e) => {
+                                const val = formatCep(e.target.value);
+                                setCompanyCep(val);
+                                const cleanCep = val.replace(/\D/g, '');
+                                if (cleanCep.length === 8) {
+                                  setIsSearchingCompanyCep(true);
+                                  setCompanyError('');
+                                  try {
+                                    const response = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+                                    if (!response.ok) throw new Error('Falha de conexão.');
+                                    const data = await response.json();
+                                    if (data.erro) {
+                                      setCompanyError('CEP corporativo não encontrado.');
+                                    } else {
+                                      const formatted = `${data.logradouro || ''}${data.bairro ? ' - ' + data.bairro : ''}${data.localidade ? ' - ' + data.localidade : ''}${data.uf ? '/' + data.uf : ''}`;
+                                      setCompanyEndereco(formatted);
+                                    }
+                                  } catch (err) {
+                                    setCompanyError('Erro ao consultar CEP.');
+                                  } finally {
+                                    setIsSearchingCompanyCep(false);
+                                  }
+                                }
+                              }}
+                              placeholder="00000-000"
                               maxLength={9}
                               className="w-full rounded-lg border border-gray-200 bg-white p-2 text-xs outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-white font-mono"
                             />
