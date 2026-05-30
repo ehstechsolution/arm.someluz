@@ -294,7 +294,7 @@ export default function App() {
       case 'clientes':
         return <ClientsScreen />;
       case 'documentos':
-        return <DocumentsScreen />;
+        return <DocumentsScreen company={companyConfig} />;
       case 'equipe':
         return <TeamScreen />;
       case 'equipamentos':

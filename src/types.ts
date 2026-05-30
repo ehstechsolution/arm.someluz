@@ -65,6 +65,49 @@ export interface DocumentItem {
   date: string;
 }
 
+export interface Orcamento {
+  id?: string;
+  cliente: {
+    nomeCompleto: string;
+    cpf: string;
+    cep: string;
+    logradouro: string;
+    numeroAddress: string;
+    bairro: string;
+    cidade: string;
+    estado: string;
+    complemento: string;
+    telefone: string;
+    email: string;
+  };
+  evento: {
+    tipo_evento: string;
+    data_evento: any; // Timestamp or ISO string
+    local_evento: string;
+    endereco_evento?: string;
+    endereco_evento_detalhado?: any;
+    taxa_deslocamento: number;
+    taxaDeslocamento?: number;
+  };
+  pacote: {
+    pacoteId: string;
+    pacoteNome: string;
+    pacotePreco: number;
+    subtotal: number;
+    taxaDeslocamento: number;
+    valorTotal: number;
+    itens?: any[]; // For custom items/components if needed
+  };
+  dataEvento: string;
+  horarioInicio: string;
+  localEvento: string;
+  enderecoEvento?: string;
+  status: 'proposta_solicitada' | 'pronto_para_envio' | 'aprovado' | 'rejeitado';
+  createdAt: any; // Timestamp
+  versao: number;
+  orcamentoOriginalId?: string;
+}
+
 export interface PackageTeamMember {
   funcao: string;
   quantidade: number;
@@ -89,4 +132,48 @@ export interface PackageCombo {
   criado_em: any;
   equipe_tecnica: PackageTeamMember[];
   equipamentos: PackageEquipment[];
+}
+
+export interface Contrato {
+  id?: string;
+  clienteId: string;
+  contratanteCidade: string;
+  contratanteCpf: string;
+  contratanteEndereco: string;
+  contratanteEstado: string;
+  contratanteNome: string;
+  contratanteNumero: string;
+  createdAt: any;
+  dataAssinatura: string;
+  dataCriacao: string;
+  dataEvento: any;
+  eventoId: string;
+  listaEquipamentos: any;
+  listaEquipe: any;
+  localEvento: string;
+  pacoteId: string;
+  pacoteItens: Array<{
+    id: string;
+    descricao: string;
+    precoUnitario: number;
+    quantidade: number;
+  }>;
+  pacoteNome: string;
+  status: string;
+  valorEntrada30: number;
+  valorInvestimento: number;
+  valorInvestimentoExtenso: string;
+  valorRestante70: number;
+}
+
+export interface CompanyConfig {
+  nomeFantasia: string;
+  razaoSocial: string;
+  cnpj: string;
+  logo: string;
+  cep: string;
+  endereco: string;
+  linkInstagram: string;
+  linkYoutube: string;
+  linkFacebook: string;
 }
