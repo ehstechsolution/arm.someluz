@@ -155,6 +155,16 @@ export default function App() {
   // Navigation state
   const [activeTab, setActiveTab] = useState<Tab>('home');
 
+  useEffect(() => {
+    const handleNavigate = (e: any) => {
+      if (e.detail) {
+        setActiveTab(e.detail);
+      }
+    };
+    window.addEventListener('als_navigate_tab', handleNavigate);
+    return () => window.removeEventListener('als_navigate_tab', handleNavigate);
+  }, []);
+
   // Theme support: Defaults to High-Fidelity DARK MODE
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem('als_theme');
