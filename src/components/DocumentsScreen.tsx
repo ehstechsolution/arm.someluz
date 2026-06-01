@@ -543,12 +543,8 @@ export default function DocumentsScreen({ company }: { company: CompanyConfig })
             } as Orcamento);
           });
           
-          if (list.length > 0) {
-            setOrcamentos(list);
-            localStorage.setItem('als_orcamentos_v2', JSON.stringify(list));
-          } else {
-            setOrcamentos(offlineBudgets);
-          }
+          setOrcamentos(list);
+          localStorage.setItem('als_orcamentos_v2', JSON.stringify(list));
           setIsLoading(false);
         }, (err) => {
           console.warn("Firestore connection exception or budgets fetch error:", err);
@@ -566,12 +562,8 @@ export default function DocumentsScreen({ company }: { company: CompanyConfig })
             } as Contrato);
           });
 
-          if (list.length > 0) {
-            setContracts(list);
-            localStorage.setItem('als_contratos_v2', JSON.stringify(list));
-          } else {
-            setContracts(offlineContratos);
-          }
+          setContracts(list);
+          localStorage.setItem('als_contratos_v2', JSON.stringify(list));
         }, (err) => {
           console.warn("Firestore contracts connection exception or fetch error:", err);
           setContracts(offlineContratos);
