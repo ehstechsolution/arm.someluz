@@ -52,6 +52,42 @@ export default function PackagesScreen() {
   const [formEquipamentos, setFormEquipamentos] = useState<PackageEquipment[]>([]);
   const [formEquipeTecnica, setFormEquipeTecnica] = useState<PackageTeamMember[]>([]);
   const [formPrecoVenda, setFormPrecoVenda] = useState('');
+  const [formFotoCapaUrl, setFormFotoCapaUrl] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Utility for Cloudinary image transformation
+  const getCloudinaryUrl = (url: string, width: number) => {
+    if (!url || !url.includes('cloudinary.com')) return url;
+    return url.replace('/upload/', `/upload/w_${width},c_limit/`);
+  };
+
+  // Upload to Cloudinary
+  const handleUploadImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setIsUploading(true);
+    setErrorMsg('');
+    try {
+      const file = files[0];
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('upload_preset', 'equipamentos');
+      const response = await fetch('https://api.cloudinary.com/v1_1/dnatvwcxy/image/upload', {
+        method: 'POST',
+        body: formData
+      });
+      if (!response.ok) throw new Error('Falha no upload para o Cloudinary.');
+      const data = await response.json();
+      setFormFotoCapaUrl(data.secure_url);
+      showToast('success', 'Imagem de capa enviada com sucesso!');
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg('Falha no upload da imagem de capa.');
+      showToast('error', 'Falha no upload da imagem.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   // Equipment selection helpers
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('Todos');
@@ -176,7 +212,8 @@ export default function PackagesScreen() {
             preco_venda: finalPrecoVenda,
             criado_em: data.criado_em || data.atualizado_em || new Date().toISOString(),
             equipe_tecnica: data.equipe_tecnica || [],
-            equipamentos: resolvedEquipos
+            equipamentos: resolvedEquipos,
+            foto_capa_url: data.foto_capa_url || ''
           });
         });
         setPackagesList(list);
@@ -250,7 +287,8 @@ export default function PackagesScreen() {
           preco_venda: updated.preco_venda,
           criado_em: updated.criado_em,
           equipe_tecnica: updated.equipe_tecnica,
-          equipamentos: updated.equipamentos
+          equipamentos: updated.equipamentos,
+          foto_capa_url: updated.foto_capa_url || ''
         });
         showToast('success', `Pacote "${updated.titulo}" ${updated.ativo ? 'ativado' : 'desativado'} com sucesso.`);
       } catch (err: any) {
@@ -368,6 +406,7 @@ export default function PackagesScreen() {
     setFormEquipamentos([]);
     setFormEquipeTecnica([]);
     setFormPrecoVenda('');
+    setFormFotoCapaUrl('');
     setSelectedStaffFuncao('');
     setCustomDiariaRate('');
     setStaffQuantity(1);
@@ -384,6 +423,7 @@ export default function PackagesScreen() {
     setFormEquipamentos(combo.equipamentos || []);
     setFormEquipeTecnica(combo.equipe_tecnica || []);
     setFormPrecoVenda(combo.preco_venda.toString());
+    setFormFotoCapaUrl(combo.foto_capa_url || '');
     setSelectedStaffFuncao('');
     setCustomDiariaRate('');
     setStaffQuantity(1);
@@ -421,7 +461,8 @@ export default function PackagesScreen() {
         ? (packagesList.find(p => p.id === editingId)?.criado_em || new Date().toISOString()) 
         : new Date().toISOString(),
       equipe_tecnica: formEquipeTecnica,
-      equipamentos: formEquipamentos
+      equipamentos: formEquipamentos,
+      foto_capa_url: formFotoCapaUrl.trim()
     };
 
     const db = getFirebaseDb();
@@ -435,7 +476,8 @@ export default function PackagesScreen() {
           preco_venda: payload.preco_venda,
           criado_em: payload.criado_em,
           equipe_tecnica: payload.equipe_tecnica,
-          equipamentos: payload.equipamentos
+          equipamentos: payload.equipamentos,
+          foto_capa_url: payload.foto_capa_url
         });
 
         // Send POST webhook containing package data and { origem: "pacote" }
@@ -603,6 +645,18 @@ export default function PackagesScreen() {
                   !combo.ativo ? 'opacity-60' : ''
                 }`}
               >
+                {/* Visual Banner */}
+                {combo.foto_capa_url && (
+                  <div className="relative aspect-video w-full overflow-hidden bg-zinc-100 dark:bg-zinc-950/90 cursor-pointer" onClick={() => setSelectedPackage(combo)}>
+                    <img 
+                      referrerPolicy="no-referrer"
+                      src={getCloudinaryUrl(combo.foto_capa_url, 400)} 
+                      alt={combo.titulo} 
+                      className="h-full w-full object-cover transition-transform duration-500 hover:scale-102"
+                    />
+                  </div>
+                )}
+
                 {/* Header card body */}
                 <div className="p-5 space-y-4 flex-1 flex flex-col justify-between" onClick={() => setSelectedPackage(combo)}>
                   <div className="space-y-2">
@@ -822,6 +876,63 @@ export default function PackagesScreen() {
                         placeholder="Insira detalhes de montagem e facilidades de contratação para o cliente."
                         rows={3}
                         className="w-full rounded-xl border border-gray-200 bg-white p-3 text-xs text-gray-900 dark:border-zinc-800 dark:bg-zinc-950 dark:text-white outline-none focus:border-[#A3E635] font-semibold resize-none"
+                      />
+                    </div>
+
+                    {/* Foto de Capa do Pacote */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10.5px] uppercase font-extrabold text-gray-500 dark:text-zinc-400 block">
+                        Foto de Capa do Pacote
+                      </label>
+                      {formFotoCapaUrl ? (
+                        <div className="relative aspect-video rounded-xl overflow-hidden group border border-gray-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950/40">
+                          <img 
+                            referrerPolicy="no-referrer"
+                            src={getCloudinaryUrl(formFotoCapaUrl, 400)} 
+                            alt="Foto de capa do pacote" 
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute inset-0 bg-zinc-950/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <button 
+                              type="button" 
+                              onClick={() => setFormFotoCapaUrl('')} 
+                              className="p-2 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
+                              title="Remover Imagem"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const input = document.getElementById('package-file-input');
+                            if (input) input.click();
+                          }}
+                          disabled={isUploading}
+                          className="w-full aspect-video rounded-xl border-2 border-dashed border-gray-250 dark:border-zinc-800 flex flex-col items-center justify-center gap-2 text-gray-400 hover:border-[#A3E635] hover:text-[#A3E635] bg-zinc-50/50 dark:bg-zinc-950/10 transition-all cursor-pointer"
+                        >
+                          {isUploading ? (
+                            <>
+                              <RefreshCw className="h-6 w-6 animate-spin text-[#A3E635]" />
+                              <span className="text-[10px] font-bold uppercase tracking-wider">Enviando imagem...</span>
+                            </>
+                          ) : (
+                            <>
+                              <PlusCircle className="h-6 w-6" />
+                              <span className="text-[10px] font-bold uppercase tracking-wider">Selecionar Foto de Capa</span>
+                              <span className="text-[9px] text-gray-400">Suporta JPG, PNG. Envio automático via Cloudinary</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                      <input 
+                        type="file" 
+                        id="package-file-input" 
+                        className="hidden" 
+                        accept="image/*" 
+                        onChange={handleUploadImages} 
                       />
                     </div>
 
@@ -1184,6 +1295,16 @@ export default function PackagesScreen() {
           <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedPackage(null)} className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm" />
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-white dark:bg-zinc-900 rounded-2xl w-full max-w-2xl p-6 overflow-hidden max-h-[90vh] overflow-y-auto">
+              {selectedPackage.foto_capa_url && (
+                <div className="w-full aspect-video rounded-xl overflow-hidden mb-4 bg-zinc-100 dark:bg-zinc-950/40">
+                  <img 
+                    referrerPolicy="no-referrer"
+                    src={getCloudinaryUrl(selectedPackage.foto_capa_url, 600)} 
+                    alt={selectedPackage.titulo} 
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              )}
               <h3 className="text-xl font-black">{selectedPackage.titulo}</h3>
               <p className="text-sm mt-2 text-gray-500 dark:text-zinc-400">{selectedPackage.descricao}</p>
               
