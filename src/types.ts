@@ -132,6 +132,7 @@ export interface PackageCombo {
   criado_em: any;
   equipe_tecnica: PackageTeamMember[];
   equipamentos: PackageEquipment[];
+  foto_capa_url?: string;
 }
 
 export interface Contrato {
