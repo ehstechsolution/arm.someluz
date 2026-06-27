@@ -19,6 +19,7 @@ import {
   Layers, 
   ShieldCheck,
   ChevronRight,
+  ChevronLeft,
   PlusCircle,
   MinusCircle
 } from 'lucide-react';
@@ -53,11 +54,30 @@ export default function PackagesScreen() {
   const [formEquipeTecnica, setFormEquipeTecnica] = useState<PackageTeamMember[]>([]);
   const [formPrecoVenda, setFormPrecoVenda] = useState('');
   const [formFotoCapaUrl, setFormFotoCapaUrl] = useState('');
+  const [formFotos, setFormFotos] = useState<string[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
+
+  // Reset image carousel index when selected package changes
+  useEffect(() => {
+    setCurrentImageIndex(0);
+  }, [selectedPackage]);
+
+  // Helper to detect if a URL is a video
+  const isVideoUrl = (url: string) => {
+    if (!url) return false;
+    return url.includes('/video/upload/') || 
+           url.endsWith('.mp4') || 
+           url.endsWith('.mov') || 
+           url.endsWith('.avi') || 
+           url.endsWith('.webm') || 
+           url.endsWith('.mkv');
+  };
 
   // Utility for Cloudinary image transformation
   const getCloudinaryUrl = (url: string, width: number) => {
     if (!url || !url.includes('cloudinary.com')) return url;
+    if (isVideoUrl(url)) return url; // Skip video transformation for image widths
     return url.replace('/upload/', `/upload/w_${width},c_limit/`);
   };
 
@@ -68,22 +88,36 @@ export default function PackagesScreen() {
     setIsUploading(true);
     setErrorMsg('');
     try {
-      const file = files[0];
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('upload_preset', 'equipamentos');
-      const response = await fetch('https://api.cloudinary.com/v1_1/dnatvwcxy/image/upload', {
-        method: 'POST',
-        body: formData
+      const uploadPromises = Array.from(files).map(async (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('upload_preset', 'equipamentos');
+        
+        const isVideo = file.type.startsWith('video/');
+        const uploadUrl = isVideo 
+          ? 'https://api.cloudinary.com/v1_1/dnatvwcxy/video/upload' 
+          : 'https://api.cloudinary.com/v1_1/dnatvwcxy/image/upload';
+
+        const response = await fetch(uploadUrl, {
+          method: 'POST',
+          body: formData
+        });
+        if (!response.ok) throw new Error('Falha no upload para o Cloudinary.');
+        const data = await response.json();
+        return data.secure_url;
       });
-      if (!response.ok) throw new Error('Falha no upload para o Cloudinary.');
-      const data = await response.json();
-      setFormFotoCapaUrl(data.secure_url);
-      showToast('success', 'Imagem de capa enviada com sucesso!');
+      
+      const urls = await Promise.all(uploadPromises);
+      const updatedFotos = [...formFotos, ...urls];
+      setFormFotos(updatedFotos);
+      if (!formFotoCapaUrl && updatedFotos.length > 0) {
+        setFormFotoCapaUrl(updatedFotos[0]);
+      }
+      showToast('success', 'Mídia(s) enviada(s) com sucesso!');
     } catch (err: any) {
       console.error(err);
-      setErrorMsg('Falha no upload da imagem de capa.');
-      showToast('error', 'Falha no upload da imagem.');
+      setErrorMsg('Falha no upload das mídias.');
+      showToast('error', 'Falha no upload das mídias.');
     } finally {
       setIsUploading(false);
     }
@@ -213,7 +247,8 @@ export default function PackagesScreen() {
             criado_em: data.criado_em || data.atualizado_em || new Date().toISOString(),
             equipe_tecnica: data.equipe_tecnica || [],
             equipamentos: resolvedEquipos,
-            foto_capa_url: data.foto_capa_url || ''
+            foto_capa_url: data.foto_capa_url || '',
+            fotos: data.fotos || (data.foto_capa_url ? [data.foto_capa_url] : [])
           });
         });
         setPackagesList(list);
@@ -288,7 +323,8 @@ export default function PackagesScreen() {
           criado_em: updated.criado_em,
           equipe_tecnica: updated.equipe_tecnica,
           equipamentos: updated.equipamentos,
-          foto_capa_url: updated.foto_capa_url || ''
+          foto_capa_url: updated.foto_capa_url || '',
+          fotos: updated.fotos || []
         });
         showToast('success', `Pacote "${updated.titulo}" ${updated.ativo ? 'ativado' : 'desativado'} com sucesso.`);
       } catch (err: any) {
@@ -407,6 +443,7 @@ export default function PackagesScreen() {
     setFormEquipeTecnica([]);
     setFormPrecoVenda('');
     setFormFotoCapaUrl('');
+    setFormFotos([]);
     setSelectedStaffFuncao('');
     setCustomDiariaRate('');
     setStaffQuantity(1);
@@ -424,6 +461,7 @@ export default function PackagesScreen() {
     setFormEquipeTecnica(combo.equipe_tecnica || []);
     setFormPrecoVenda(combo.preco_venda.toString());
     setFormFotoCapaUrl(combo.foto_capa_url || '');
+    setFormFotos(combo.fotos || (combo.foto_capa_url ? [combo.foto_capa_url] : []));
     setSelectedStaffFuncao('');
     setCustomDiariaRate('');
     setStaffQuantity(1);
@@ -462,7 +500,8 @@ export default function PackagesScreen() {
         : new Date().toISOString(),
       equipe_tecnica: formEquipeTecnica,
       equipamentos: formEquipamentos,
-      foto_capa_url: formFotoCapaUrl.trim()
+      foto_capa_url: formFotoCapaUrl.trim(),
+      fotos: formFotos
     };
 
     const db = getFirebaseDb();
@@ -477,7 +516,8 @@ export default function PackagesScreen() {
           criado_em: payload.criado_em,
           equipe_tecnica: payload.equipe_tecnica,
           equipamentos: payload.equipamentos,
-          foto_capa_url: payload.foto_capa_url
+          foto_capa_url: payload.foto_capa_url,
+          fotos: payload.fotos || []
         });
 
         // Send POST webhook containing package data and { origem: "pacote" }
@@ -648,12 +688,23 @@ export default function PackagesScreen() {
                 {/* Visual Banner */}
                 {combo.foto_capa_url && (
                   <div className="relative aspect-video w-full overflow-hidden bg-zinc-100 dark:bg-zinc-950/90 cursor-pointer" onClick={() => setSelectedPackage(combo)}>
-                    <img 
-                      referrerPolicy="no-referrer"
-                      src={getCloudinaryUrl(combo.foto_capa_url, 400)} 
-                      alt={combo.titulo} 
-                      className="h-full w-full object-cover transition-transform duration-500 hover:scale-102"
-                    />
+                    {isVideoUrl(combo.foto_capa_url) ? (
+                      <video 
+                        src={combo.foto_capa_url} 
+                        className="h-full w-full object-contain bg-black transition-transform duration-500 hover:scale-102"
+                        autoPlay
+                        muted
+                        loop
+                        playsInline
+                      />
+                    ) : (
+                      <img 
+                        referrerPolicy="no-referrer"
+                        src={getCloudinaryUrl(combo.foto_capa_url, 400)} 
+                        alt={combo.titulo} 
+                        className="h-full w-full object-contain transition-transform duration-500 hover:scale-102"
+                      />
+                    )}
                   </div>
                 )}
 
@@ -879,25 +930,51 @@ export default function PackagesScreen() {
                       />
                     </div>
 
-                    {/* Foto de Capa do Pacote */}
-                    <div className="space-y-1.5">
-                      <label className="text-[10.5px] uppercase font-extrabold text-gray-500 dark:text-zinc-400 block">
-                        Foto de Capa do Pacote
-                      </label>
+                    {/* Fotos do Pacote & Carrossel */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10.5px] uppercase font-extrabold text-gray-500 dark:text-zinc-400 block">
+                          Galeria de Mídias do Pacote
+                        </label>
+                        {formFotos.length > 0 && (
+                          <span className="text-[10px] font-bold text-[#A3E635]">
+                            {formFotos.length} {formFotos.length === 1 ? 'mídia' : 'mídias'}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Cover image preview or upload zone */}
                       {formFotoCapaUrl ? (
                         <div className="relative aspect-video rounded-xl overflow-hidden group border border-gray-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950/40">
-                          <img 
-                            referrerPolicy="no-referrer"
-                            src={getCloudinaryUrl(formFotoCapaUrl, 400)} 
-                            alt="Foto de capa do pacote" 
-                            className="w-full h-full object-cover"
-                          />
-                          <div className="absolute inset-0 bg-zinc-950/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                          {isVideoUrl(formFotoCapaUrl) ? (
+                            <video 
+                              src={formFotoCapaUrl} 
+                              className="w-full h-full object-contain bg-black"
+                              controls
+                              muted
+                              playsInline
+                            />
+                          ) : (
+                            <img 
+                              referrerPolicy="no-referrer"
+                              src={getCloudinaryUrl(formFotoCapaUrl, 400)} 
+                              alt="Foto de capa do pacote" 
+                              className="w-full h-full object-contain"
+                            />
+                          )}
+                          <div className="absolute top-2 left-2 bg-black/75 backdrop-blur px-2.5 py-1 rounded-md border border-[#A3E635]/30 pointer-events-none">
+                            <span className="text-[9px] font-black text-[#A3E635] tracking-wider uppercase">FOTO DE CAPA</span>
+                          </div>
+                          <div className="absolute inset-0 bg-zinc-950/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity gap-2 pointer-events-none">
                             <button 
                               type="button" 
-                              onClick={() => setFormFotoCapaUrl('')} 
-                              className="p-2 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
-                              title="Remover Imagem"
+                              onClick={() => {
+                                const newFotos = formFotos.filter(f => f !== formFotoCapaUrl);
+                                setFormFotos(newFotos);
+                                setFormFotoCapaUrl(newFotos[0] || '');
+                              }} 
+                              className="p-2 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors pointer-events-auto"
+                              title="Remover da Galeria"
                             >
                               <Trash2 className="h-4 w-4" />
                             </button>
@@ -916,22 +993,107 @@ export default function PackagesScreen() {
                           {isUploading ? (
                             <>
                               <RefreshCw className="h-6 w-6 animate-spin text-[#A3E635]" />
-                              <span className="text-[10px] font-bold uppercase tracking-wider">Enviando imagem...</span>
+                              <span className="text-[10px] font-bold uppercase tracking-wider">Enviando mídias...</span>
                             </>
                           ) : (
                             <>
                               <PlusCircle className="h-6 w-6" />
-                              <span className="text-[10px] font-bold uppercase tracking-wider">Selecionar Foto de Capa</span>
-                              <span className="text-[9px] text-gray-400">Suporta JPG, PNG. Envio automático via Cloudinary</span>
+                              <span className="text-[10px] font-bold uppercase tracking-wider">Selecionar Imagens / Vídeos</span>
+                              <span className="text-[9px] text-gray-400">Suporta JPG, PNG, MP4. Envio automático via Cloudinary</span>
                             </>
                           )}
                         </button>
                       )}
+
+                      {/* Thumbnails of all uploaded images */}
+                      {formFotos.length > 0 && (
+                        <div className="grid grid-cols-4 gap-2">
+                          {formFotos.map((foto, idx) => {
+                            const isCapa = foto === formFotoCapaUrl;
+                            const isVideo = isVideoUrl(foto);
+                            return (
+                              <div 
+                                key={idx} 
+                                className={`relative aspect-square rounded-lg overflow-hidden border cursor-pointer group bg-zinc-100 dark:bg-zinc-950/40 transition-all ${
+                                  isCapa 
+                                    ? 'border-[#A3E635] ring-2 ring-[#A3E635]/20' 
+                                    : 'border-gray-200 dark:border-zinc-800 hover:border-gray-400 dark:hover:border-zinc-700'
+                                }`}
+                              >
+                                {isVideo ? (
+                                  <div className="w-full h-full relative" onClick={() => setFormFotoCapaUrl(foto)}>
+                                    <video 
+                                      src={foto} 
+                                      className="w-full h-full object-contain bg-black"
+                                      muted
+                                      playsInline
+                                    />
+                                    <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                                      <div className="p-1 rounded-full bg-black/60 text-white">
+                                        <PlusCircle className="h-3.5 w-3.5" />
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <img 
+                                    referrerPolicy="no-referrer"
+                                    src={getCloudinaryUrl(foto, 150)} 
+                                    alt={`Miniatura ${idx + 1}`} 
+                                    className="w-full h-full object-contain"
+                                    onClick={() => setFormFotoCapaUrl(foto)}
+                                  />
+                                )}
+                                {isCapa && (
+                                  <div className="absolute bottom-0 inset-x-0 bg-[#A3E635] py-0.5 text-center pointer-events-none">
+                                    <span className="text-[8px] font-bold text-zinc-950 block leading-none">CAPA</span>
+                                  </div>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const newFotos = formFotos.filter(f => f !== foto);
+                                    setFormFotos(newFotos);
+                                    if (isCapa) {
+                                      setFormFotoCapaUrl(newFotos[0] || '');
+                                    }
+                                  }}
+                                  className="absolute top-1 right-1 p-1 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600 z-10"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                          
+                          {/* Upload More Button inside grid */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const input = document.getElementById('package-file-input');
+                              if (input) input.click();
+                            }}
+                            disabled={isUploading}
+                            className="aspect-square rounded-lg border border-dashed border-gray-300 dark:border-zinc-800 flex flex-col items-center justify-center text-gray-400 hover:border-[#A3E635] hover:text-[#A3E635] bg-zinc-50/50 dark:bg-zinc-950/10 transition-all"
+                          >
+                            {isUploading ? (
+                              <RefreshCw className="h-4 w-4 animate-spin text-[#A3E635]" />
+                            ) : (
+                              <>
+                                <Plus className="h-4 w-4" />
+                                <span className="text-[8px] font-bold uppercase mt-1">Mais</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+
                       <input 
                         type="file" 
                         id="package-file-input" 
                         className="hidden" 
-                        accept="image/*" 
+                        accept="image/*,video/*" 
+                        multiple
                         onChange={handleUploadImages} 
                       />
                     </div>
@@ -1295,16 +1457,65 @@ export default function PackagesScreen() {
           <div className="fixed inset-0 z-40 flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSelectedPackage(null)} className="absolute inset-0 bg-zinc-950/80 backdrop-blur-sm" />
             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-white dark:bg-zinc-900 rounded-2xl w-full max-w-2xl p-6 overflow-hidden max-h-[90vh] overflow-y-auto">
-              {selectedPackage.foto_capa_url && (
-                <div className="w-full aspect-video rounded-xl overflow-hidden mb-4 bg-zinc-100 dark:bg-zinc-950/40">
-                  <img 
-                    referrerPolicy="no-referrer"
-                    src={getCloudinaryUrl(selectedPackage.foto_capa_url, 600)} 
-                    alt={selectedPackage.titulo} 
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              )}
+              {(() => {
+                const packageFotos = selectedPackage.fotos && selectedPackage.fotos.length > 0 
+                  ? selectedPackage.fotos 
+                  : (selectedPackage.foto_capa_url ? [selectedPackage.foto_capa_url] : []);
+                
+                if (packageFotos.length === 0) return null;
+
+                return (
+                  <div className="relative aspect-video rounded-xl overflow-hidden mb-4 bg-zinc-100 dark:bg-zinc-950/80 border border-gray-200 dark:border-zinc-800">
+                    {isVideoUrl(packageFotos[currentImageIndex]) ? (
+                      <video 
+                        src={packageFotos[currentImageIndex]} 
+                        className="w-full h-full object-contain bg-black"
+                        controls
+                        autoPlay
+                        playsInline
+                      />
+                    ) : (
+                      <img 
+                        referrerPolicy="no-referrer"
+                        src={getCloudinaryUrl(packageFotos[currentImageIndex], 600)} 
+                        alt={selectedPackage.titulo} 
+                        className="w-full h-full object-contain"
+                      />
+                    )}
+                    
+                    {packageFotos.length > 1 && (
+                      <>
+                        <button 
+                          type="button"
+                          onClick={() => setCurrentImageIndex((c) => (c - 1 + packageFotos.length) % packageFotos.length)} 
+                          className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/60 dark:bg-zinc-900/60 hover:bg-white dark:hover:bg-zinc-800 text-zinc-900 dark:text-white transition-all shadow backdrop-blur-sm z-10"
+                          title="Imagem Anterior"
+                        >
+                          <ChevronLeft className="h-5 w-5" />
+                        </button>
+                        <button 
+                          type="button"
+                          onClick={() => setCurrentImageIndex((c) => (c + 1) % packageFotos.length)} 
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-white/60 dark:bg-zinc-900/60 hover:bg-white dark:hover:bg-zinc-800 text-zinc-900 dark:text-white transition-all shadow backdrop-blur-sm z-10"
+                          title="Próxima Imagem"
+                        >
+                          <ChevronRight className="h-5 w-5" />
+                        </button>
+                        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10 bg-black/40 px-2.5 py-1 rounded-full backdrop-blur-sm">
+                          {packageFotos.map((_, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => setCurrentImageIndex(i)}
+                              className={`h-1.5 rounded-full transition-all duration-300 ${i === currentImageIndex ? 'bg-[#A3E635] w-3.5' : 'bg-white/60 w-1.5'}`}
+                            />
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
               <h3 className="text-xl font-black">{selectedPackage.titulo}</h3>
               <p className="text-sm mt-2 text-gray-500 dark:text-zinc-400">{selectedPackage.descricao}</p>
               
