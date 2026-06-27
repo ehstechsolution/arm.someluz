@@ -133,6 +133,7 @@ export interface PackageCombo {
   equipe_tecnica: PackageTeamMember[];
   equipamentos: PackageEquipment[];
   foto_capa_url?: string;
+  fotos?: string[];
 }
 
 export interface Contrato {
